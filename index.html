@@ -276,7 +276,7 @@ function parseESPN(data){
 async function fetchData(){
   S.refreshing=true;render();
   try{
-    const r=await fetch('/api/scores',{cache:'no-store'});
+    const r=await fetch('https://site.api.espn.com/apis/site/v2/sports/golf/leagues/pga/scoreboard',{cache:'no-store'});
     if(!r.ok)throw new Error('HTTP '+r.status);
     const j=await r.json();const ps=parseESPN(j);
     if(!ps||!ps.length)throw new Error('No data');
