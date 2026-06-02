@@ -515,10 +515,14 @@ function projPay(pos,tieMap){
   const rank=parseInt(pos.replace(/^T/,''),10);
   if(isNaN(rank))return 0;
   const n=tieMap[pos]||1;
+  // A player who made the cut always earns at least the last listed (80th)
+  // share. If a big tie at the cut line pushes finishers past position 80,
+  // they get that minimum rather than $0 — matching how the Tour pays overflow.
+  const floor=PO[PO.length-1];
   let sum=0;
   for(let i=0;i<n;i++){
     const idx=rank-1+i;
-    sum+=idx<PO.length?PO[idx]:CUT_PAY;
+    sum+=idx<PO.length?PO[idx]:floor;
   }
   return Math.round(sum/n);
 }
