@@ -475,11 +475,16 @@ PT.forEach(([,picks])=>picks.forEach(i=>{const c=can(PL[i]);SELCOUNT[c]=(SELCOUN
 const PAYOUT_PCT=[0.18,0.109,0.069,0.049,0.041,0.03625,0.03375,0.03125,0.02925,0.02725,0.02525,0.02325,0.02125,0.01925,0.01825,0.01725,0.01625,0.01525,0.01425,0.01325,0.01225,0.01125,0.01045,0.00965,0.00885,0.00805,0.00775,0.00745,0.00715,0.00685,0.00655,0.00625,0.00595,0.0057,0.00545,0.0052,0.00495,0.00475,0.00455,0.00435,0.00415,0.00395,0.00375,0.00355,0.00335,0.00315,0.00295,0.00279,0.00265,0.00257,0.00251,0.00245,0.00241,0.00237,0.00235,0.00233,0.00231,0.00229,0.00227,0.00225,0.00223,0.00221,0.00219,0.00217,0.00215,0.00213,0.00211,0.00209,0.00207,0.00205,0.00203,0.00201,0.00199,0.00197,0.00195,0.00193,0.00191,0.00189,0.00187,0.00185];
 
 // Host-invitational signature events ($20M, top-50-and-ties + within-10 cut) use a
-// distinct, steeper distribution: winner 20%, paid down to 50th. Verified to the
-// dollar against the official 2026 Memorial breakdown. Used by Memorial, Arnold
+// distinct, steeper distribution: winner 20%. Positions 1-50 distribute the FULL
+// $20M purse (sum = exactly $20,000,000). When ties push MORE than 50 players past
+// the cut, the Tour pays the extra positions ON TOP of the purse (so the real total
+// can exceed $20M — e.g. the 2025 Memorial paid $20,336,000 to 57 finishers). Places
+// 51-57 below carry the official amounts ($51k,$50k,$49k,$48k,$47k,$46k,$45k) so
+// every tie-at-the-cut splits to the exact dollar instead of flooring. Verified to
+// the dollar vs the official 2025/2026 Memorial breakdowns. Used by Memorial, Arnold
 // Palmer, Genesis. (No-cut signature events like Cadillac/Travelers use PAYOUT_PCT —
 // confirmed to the dollar vs the 2026 Cadillac Championship.)
-const SIGNATURE_PCT=[0.2,0.11,0.07,0.05,0.042,0.038,0.035,0.0323,0.03,0.0278,0.0257,0.0236,0.0215,0.01945,0.01845,0.01745,0.01645,0.01545,0.01445,0.01345,0.0125,0.01165,0.0108,0.01,0.0092,0.0084,0.00805,0.0077,0.00735,0.007,0.00665,0.0063,0.00595,0.0057,0.00545,0.0052,0.00495,0.0047,0.0045,0.0043,0.0041,0.0039,0.0037,0.0035,0.0033,0.0031,0.0029,0.0028,0.0027,0.0026];
+const SIGNATURE_PCT=[0.2,0.11,0.07,0.05,0.042,0.038,0.035,0.0323,0.03,0.0278,0.0257,0.0236,0.0215,0.01945,0.01845,0.01745,0.01645,0.01545,0.01445,0.01345,0.0125,0.01165,0.0108,0.01,0.0092,0.0084,0.00805,0.0077,0.00735,0.007,0.00665,0.0063,0.00595,0.0057,0.00545,0.0052,0.00495,0.0047,0.0045,0.0043,0.0041,0.0039,0.0037,0.0035,0.0033,0.0031,0.0029,0.0028,0.0027,0.0026,0.00255,0.0025,0.00245,0.0024,0.00235,0.0023,0.00225];
 
 // The four majors each publish their OWN money list. Each table below is the exact
 // per-position share of purse, verified to the dollar against the official breakdown
