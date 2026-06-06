@@ -201,7 +201,7 @@ try{
     S.tournamentName=d.tournamentName||'Byron Nelson';
     S.venueName=d.venueName||'TPC Craig Ranch';
     S.startDate=d.startDate||'';
-    const ti=getTournamentInfo(S.tournamentName);PO=calcPO(ti.purse,ti.curve);MC_PAY=ti.mcPay;
+    const ti=getTournamentInfo(S.tournamentName);PO=calcPO(d.purse||ti.purse,ti.curve);MC_PAY=ti.mcPay;
   }}
 }catch{}
 
@@ -318,15 +318,19 @@ async function fetchData(){
       const allSeen=[...new Set([...prevSeen,...nowSeen])];
       S.seen=allSeen;
       const newTname=j?.events?.[0]?.shortName||j?.events?.[0]?.name||S.tournamentName;
-      if(newTname!==S.tournamentName){
-        S.tournamentName=newTname;
-        const ti2=getTournamentInfo(newTname);PO=calcPO(ti2.purse,ti2.curve);MC_PAY=ti2.mcPay;
-      }
+      if(newTname!==S.tournamentName)S.tournamentName=newTname;
+      // Purse comes LIVE from ESPN (exact, current); the curve shape comes from
+      // our verified tables. Fall back to the scheduled estimate only if ESPN
+      // hasn't published the purse yet. Recomputed every refresh.
+      const ti2=getTournamentInfo(S.tournamentName);
+      const espnPurse=Number(j?.events?.[0]?.purse)||0;
+      const usePurse=espnPurse>0?espnPurse:ti2.purse;
+      PO=calcPO(usePurse,ti2.curve);MC_PAY=ti2.mcPay;
       const espnVenue=j?.events?.[0]?.competitions?.[0]?.venue?.fullName||'';
-      S.venueName=espnVenue||getTournamentInfo(S.tournamentName).venue||S.venueName;
+      S.venueName=espnVenue||ti2.venue||S.venueName;
       const ck2='bz-'+can(S.tournamentName).replace(/ /g,'').slice(0,18);
       localStorage.setItem('bz-current-key',ck2);
-      localStorage.setItem(ck2,JSON.stringify({players:parsed.players,updated:S.updated,status:S.status,seen:allSeen,tournamentName:S.tournamentName,venueName:S.venueName}));
+      localStorage.setItem(ck2,JSON.stringify({players:parsed.players,updated:S.updated,status:S.status,seen:allSeen,tournamentName:S.tournamentName,venueName:S.venueName,purse:usePurse}));
     }catch{}
   }catch(e){S.error=e.message||'Refresh failed'}
   S.refreshing=false;render();
