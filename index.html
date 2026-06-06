@@ -230,8 +230,14 @@ function parseESPN(data){
   // This lets us drop missed-cut players to $0 the moment the math is clear —
   // before ESPN posts Saturday tee times. Guarded so no-cut events never trip it:
   // require we've reached the cut round and that a real cut exists (0<count<field).
+  // CRITICAL: only use the cutScore line to fill the gap BEFORE round-3 scoring
+  // starts. cutScore is the 36-hole line; once R3 is underway a player's total
+  // includes R3 progress, so a made-cut player playing a bad Saturday (e.g. +5
+  // after R2 -> +12 in R3) would falsely exceed it. Once isR3Plus, the tee-time/
+  // round-3-data logic (isCutByR3) governs — it keys off absence from the R3
+  // field, which stays correct no matter how made-cut players score.
   const espnCut=data?.events?.[0]?.cut||null;
-  const cutLineActive=!!espnCut && espnCut.score!=null && espnCut.round!=null
+  const cutLineActive=!isR3Plus && !!espnCut && espnCut.score!=null && espnCut.round!=null
     && (espnCut.currentRound==null||espnCut.currentRound>=espnCut.round)
     && espnCut.count!=null && espnCut.count>0 && espnCut.count<cs.length;
   const parScore=v=>{const s=String(v==null?'':v).toUpperCase().trim();
