@@ -555,9 +555,7 @@ function projPay(pos,tieMap){
 
 function fmt$(v){
   if(v===0)return'—';
-  if(v>=1000000)return'$'+(v/1000000).toFixed(2)+'M';
-  if(v>=1000)return'$'+Math.round(v/1000)+'K';
-  return'$'+v;
+  return'$'+Math.round(v).toLocaleString('en-US');
 }
 
 const FM={"BRADY MACDOWELL":"#C9A664","BEN JONES":"#3A6094","RICHARD COOMBS":"#9B4A4A"};
@@ -639,7 +637,7 @@ function summaryHTML(){
   const _tm={};S.players.forEach(p=>{if(p.pos&&p.pos!=='CUT'&&p.pos!=='WD')_tm[p.pos]=(_tm[p.pos]||0)+1});
   const _pm={};S.players.forEach(p=>{_pm[matchToPool(p.name)]=projPay(p.pos,_tm)});
   const _earn=S.isPreTournament?0:t.picks.reduce((tot,p)=>tot+(_pm[matchToPool(p)]||0),0);
-  const projStr=_earn>=1000000?'$'+(_earn/1000000).toFixed(2)+'M':_earn>=1000?'$'+Math.round(_earn/1000)+'K':'—';
+  const projStr=_earn>0?'$'+Math.round(_earn).toLocaleString('en-US'):'—';
   return`<section class="sum"><div class="sum-ttl">${icoTrophy}<span>${esc(t.name.toUpperCase())}</span></div>
 <div class="srow">
   <div><div class="slbl">Best</div><div class="sval">${best?esc(best.pos):'—'}</div></div>
