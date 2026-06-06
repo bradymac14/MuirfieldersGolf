@@ -28,6 +28,28 @@ export default async function handler(req, res) {
           }
           if (typeof core?.isSignature === 'boolean') ev.isSignature = core.isSignature;
           if (core?.playoffType != null) ev.playoffType = core.playoffType;
+
+          // Attach ESPN's live cut line/count from the tournament object.
+          // ESPN computes the cut per event (it knows each event's rule:
+          // signature top-50, standard top-65, the majors, or no-cut) and
+          // updates cutScore/cutCount in real time — so we never hardcode or
+          // guess the cut. One extra hop via tournament.$ref.
+          try {
+            const tref = (core?.tournament?.$ref || '').replace(/^http:/, 'https:');
+            if (tref) {
+              const tr = await fetch(tref, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+              if (tr.ok) {
+                const t = await tr.json();
+                const num = v => (v != null && !isNaN(v)) ? Number(v) : null;
+                ev.cut = {
+                  round: num(t?.cutRound),
+                  score: num(t?.cutScore),
+                  count: num(t?.cutCount),
+                  currentRound: num(t?.currentRound)
+                };
+              }
+            }
+          } catch (_) { /* cut enrichment is optional */ }
         }
       }
     } catch (_) { /* purse enrichment is optional */ }

@@ -223,6 +223,21 @@ function parseESPN(data){
   const isR4=r4;
   const isR3Plus=r3||r4;
 
+  // ── ESPN live cut line ──────────────────────────────────────────────────────
+  // ESPN publishes the real cut line (cutScore) + count (cutCount) per event in
+  // the tournament object (relayed by api/scores.js as ev.cut). ESPN knows each
+  // event's rule and updates it in real time, so we trust it rather than guess.
+  // This lets us drop missed-cut players to $0 the moment the math is clear —
+  // before ESPN posts Saturday tee times. Guarded so no-cut events never trip it:
+  // require we've reached the cut round and that a real cut exists (0<count<field).
+  const espnCut=data?.events?.[0]?.cut||null;
+  const cutLineActive=!!espnCut && espnCut.score!=null && espnCut.round!=null
+    && (espnCut.currentRound==null||espnCut.currentRound>=espnCut.round)
+    && espnCut.count!=null && espnCut.count>0 && espnCut.count<cs.length;
+  const parScore=v=>{const s=String(v==null?'':v).toUpperCase().trim();
+    if(s==='E')return 0;if(!s||s==='CUT'||s==='MC'||s==='WD'||s==='DQ')return null;
+    const n=parseInt(s.replace('+',''),10);return isNaN(n)?null:n;};
+
   // ── Parse each player ──────────────────────────────────────────────────────
   const parsed=cs.map(c=>{
     const name=c.athlete?.fullName||c.athlete?.displayName||'';
@@ -242,7 +257,10 @@ function parseESPN(data){
     const isCutByR3=isR3Plus&&!isR4&&!hasTeeTime&&!r3HasData&&!isWD&&allLS.length>=2;
     const isCutByR4=isR4&&!r3HasData&&allLS.length>=2;
     const isCutExplicit=sn.includes('cut')||sd.includes('cut')||scoreVal==='CUT'||scoreVal==='MC';
-    const isCut=isCutByR3||isCutByR4||isCutExplicit;
+    // Real-time cut from ESPN's published line: worse than cutScore => missed cut.
+    const myPar=parScore(c.score);
+    const isCutByLine=cutLineActive&&!isWD&&myPar!=null&&myPar>espnCut.score;
+    const isCut=isCutByR3||isCutByR4||isCutExplicit||isCutByLine;
 
     // ── Total score: sum rounds that have real data ───────────────────────
     const calcTotal=(()=>{
