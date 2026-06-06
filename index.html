@@ -201,7 +201,7 @@ try{
     S.tournamentName=d.tournamentName||'Byron Nelson';
     S.venueName=d.venueName||'TPC Craig Ranch';
     S.startDate=d.startDate||'';
-    const ti=getTournamentInfo(S.tournamentName);PO=calcPO(ti.purse,ti.wpct,ti.sig);
+    const ti=getTournamentInfo(S.tournamentName);PO=calcPO(ti.purse,ti.curve);MC_PAY=ti.mcPay;
   }}
 }catch{}
 
@@ -320,7 +320,7 @@ async function fetchData(){
       const newTname=j?.events?.[0]?.shortName||j?.events?.[0]?.name||S.tournamentName;
       if(newTname!==S.tournamentName){
         S.tournamentName=newTname;
-        const ti2=getTournamentInfo(newTname);PO=calcPO(ti2.purse,ti2.wpct);
+        const ti2=getTournamentInfo(newTname);PO=calcPO(ti2.purse,ti2.curve);MC_PAY=ti2.mcPay;
       }
       const espnVenue=j?.events?.[0]?.competitions?.[0]?.venue?.fullName||'';
       S.venueName=espnVenue||getTournamentInfo(S.tournamentName).venue||S.venueName;
@@ -446,48 +446,69 @@ PT.forEach(([,picks])=>picks.forEach(i=>{const c=can(PL[i]);SELCOUNT[c]=(SELCOUN
 // so every tournament (standard or major) pays out exactly its purse automatically.
 const PAYOUT_PCT=[0.18,0.109,0.069,0.049,0.041,0.03625,0.03375,0.03125,0.02925,0.02725,0.02525,0.02325,0.02125,0.01925,0.01825,0.01725,0.01625,0.01525,0.01425,0.01325,0.01225,0.01125,0.01045,0.00965,0.00885,0.00805,0.00775,0.00745,0.00715,0.00685,0.00655,0.00625,0.00595,0.0057,0.00545,0.0052,0.00495,0.00475,0.00455,0.00435,0.00415,0.00395,0.00375,0.00355,0.00335,0.00315,0.00295,0.00279,0.00265,0.00257,0.00251,0.00245,0.00241,0.00237,0.00235,0.00233,0.00231,0.00229,0.00227,0.00225,0.00223,0.00221,0.00219,0.00217,0.00215,0.00213,0.00211,0.00209,0.00207,0.00205,0.00203,0.00201,0.00199,0.00197,0.00195,0.00193,0.00191,0.00189,0.00187,0.00185];
 
-// Signature events ($20M, no-host limited field, top-50-and-ties cut) use a
-// distinct, steeper distribution: winner 20%, paid only down to 50th. Sums to
-// 100% of purse. Verified against the official 2026 Memorial payout breakdown.
+// Host-invitational signature events ($20M, top-50-and-ties + within-10 cut) use a
+// distinct, steeper distribution: winner 20%, paid down to 50th. Verified to the
+// dollar against the official 2026 Memorial breakdown. Used by Memorial, Arnold
+// Palmer, Genesis. (No-cut signature events like Cadillac/Travelers use PAYOUT_PCT —
+// confirmed to the dollar vs the 2026 Cadillac Championship.)
 const SIGNATURE_PCT=[0.2,0.11,0.07,0.05,0.042,0.038,0.035,0.0323,0.03,0.0278,0.0257,0.0236,0.0215,0.01945,0.01845,0.01745,0.01645,0.01545,0.01445,0.01345,0.0125,0.01165,0.0108,0.01,0.0092,0.0084,0.00805,0.0077,0.00735,0.007,0.00665,0.0063,0.00595,0.0057,0.00545,0.0052,0.00495,0.0047,0.0045,0.0043,0.0041,0.0039,0.0037,0.0035,0.0033,0.0031,0.0029,0.0028,0.0027,0.0026];
 
-// 2026 PGA Tour schedule: keyword → [purse, winner%]
-// Majors pay 20% to winner; standard events 18%; Signature Events $20M
+// The four majors each publish their OWN money list. Each table below is the exact
+// per-position share of purse, verified to the dollar against the official breakdown
+// (Masters & PGA = 2026 actuals; US Open & The Open = most recent published table,
+// applied to the 2026 purse). Missed-cut pay is handled separately (see SCHED2026).
+const MAJ_MASTERS=[0.2,0.108,0.048,0.048,0.048,0.048,0.03225,0.03225,0.028,0.028,0.025,0.019,0.019,0.019,0.019,0.019,0.019,0.014,0.014,0.014,0.0112,0.0112,0.0112,0.0081,0.0081,0.0081,0.0081,0.0081,0.0081,0.0065,0.0065,0.0065,0.0054,0.0054,0.0054,0.0054,0.0054,0.0045,0.0045,0.0045,0.0037,0.0037,0.0037,0.0037,0.0037,0.0031,0.0029,0.00274,0.00256,0.00256,0.00246,0.0024,0.00234,0.00228];
+const MAJ_PGA=[0.18,0.108,0.068,0.048,0.04,0.03549268292682927,0.03322195121951219,0.03104390243902439,0.028960975609756096,0.02697560975609756,0.025080975609756098,0.023282926829268292,0.021579024390243902,0.019970243902439025,0.01845560975609756,0.01703609756097561,0.01571121951219512,0.014480487804878048,0.013344878048780488,0.01230390243902439,0.011357560975609755,0.010505853658536585,0.00974829268292683,0.009133170731707317,0.008541951219512196,0.007973658536585366,0.007429756097560976,0.006909268292682927,0.00641219512195122,0.0059390243902439025,0.005560487804878049,0.005229268292682927,0.004945365853658536,0.004708780487804878,0.004519512195121951,0.004339512195121951,0.004164390243902439,0.0039941463414634145,0.0038282926829268293,0.003667317073170732,0.003511219512195122,0.00336,0.003213170731707317,0.003071219512195122,0.0029341463414634147,0.002801463414634146,0.0026736585365853657,0.002550731707317073,0.0024321951219512194,0.0023190243902439026,0.0022097560975609756,0.0021058536585365855,0.002006341463414634,0.0019117073170731708,0.0018219512195121951,0.0017365853658536585,0.0016560975609756098,0.0015902439024390244,0.001533170731707317,0.0014858536585365854,0.0014482926829268293,0.0014204878048780488,0.0013970731707317074,0.0013746341463414635,0.001353170731707317,0.0013321951219512195,0.0013117073170731707,0.0012917073170731707,0.0012721951219512196,0.001253170731707317,0.0012370731707317074,0.0012214634146341464,0.0012063414634146342,0.0011965853658536586,0.001188780487804878,0.0011819512195121952,0.0011770731707317073,0.0011726829268292683,0.0011692682926829267,0.0011673170731707318,0.0011663414634146341,0.0011658536585365854];
+const MAJ_USOPEN=[0.2,0.108,0.06787367441860465,0.04758204651162791,0.04078460465116279,0.039631302325581395,0.03514046511627907,0.03168051162790698,0.028373674418604652,0.025679209302325583,0.02358688372093023,0.022556046511627906,0.02152520930232558,0.019902372093023257,0.01854493023255814,0.017116046511627906,0.015891302325581395,0.014870651162790698,0.01405413953488372,0.013237627906976744,0.012421116279069767,0.011604604651162791,0.010900372093023256,0.01019613953488372,0.009512325581395349,0.00887953488372093,0.008328372093023256,0.007858883720930233,0.007501674418604651,0.007185255813953489,0.006879069767441861,0.006572883720930233,0.006266697674418605,0.005960511627906976,0.005654279069767442,0.005378744186046512,0.005154186046511628,0.004929627906976744,0.004715302325581395,0.004511209302325582,0.00430706976744186,0.00410293023255814,0.0038987906976744187,0.0036946976744186046,0.0034905581395348836,0.0032864186046511626,0.0030822790697674417,0.0028986046511627907,0.0027148837209302326,0.0025413488372093024,0.002439302325581395,0.0023372558139534883,0.002276,0.0022249767441860466,0.002184139534883721,0.0021534883720930233,0.0021228837209302325,0.0021024651162790697,0.002082093023255814,0.0020616744186046513,0.0020412558139534884,0.0020208372093023256,0.002000418604651163,0.00198,0.001959581395348837,0.0019391627906976744];
+const MAJ_OPEN=[0.18235294117647058,0.10347058823529412,0.06635294117647059,0.05152941176470588,0.04147058823529412,0.03594117647058823,0.030882352941176472,0.02602941176470588,0.022823529411764704,0.020623529411764707,0.018776470588235294,0.016635294117647057,0.015647058823529413,0.014647058823529412,0.013588235294117647,0.012511764705882352,0.011905882352941176,0.011352941176470588,0.010876470588235295,0.01036470588235294,0.00988235294117647,0.009388235294117647,0.008882352941176471,0.008388235294117648,0.008105882352941176,0.007752941176470588,0.007470588235294118,0.007211764705882353,0.0069,0.006541176470588235,0.006329411764705882,0.006005882352941177,0.005794117647058824,0.005629411764705883,0.005435294117647059,0.005217647058823529,0.004976470588235294,0.004723529411764706,0.004552941176470589,0.004405882352941176,0.004223529411764706,0.0040176470588235294,0.0038352941176470587,0.0036176470588235293,0.003411764705882353,0.003235294117647059,0.0031058823529411766,0.0029823529411764707,0.0028470588235294117,0.0027764705882352943,0.0027176470588235295,0.0026705882352941177,0.0026294117647058823,0.0025882352941176473,0.002547058823529412,0.002511764705882353,0.002488235294117647,0.0024705882352941176,0.0024529411764705883,0.002435294117647059,0.002423529411764706,0.002411764705882353,0.0024,0.002388235294117647,0.002370588235294118,0.002352941176470588,0.0023352941176470587,0.0023176470588235293,0.0023,0.002288235294117647];
+
+// Curve registry: every event maps to exactly one verified table. calcPO just
+// multiplies the chosen table by the purse — no approximation/renormalization.
+const CURVES={std:PAYOUT_PCT,sig:SIGNATURE_PCT,masters:MAJ_MASTERS,pga:MAJ_PGA,usopen:MAJ_USOPEN,open:MAJ_OPEN};
+
+// 2026 PGA Tour schedule: keyword → [purse, curveKey, venue, startDate, mcPay]
+// curveKey selects the exact verified payout %-table from CURVES.
+//   'std'    = PGA standard chart (winner 18%, 80 places) — used by full-field
+//              events AND no-cut signature events (Cadillac/Pebble/Heritage/
+//              Truist/Travelers all match this chart to the dollar at $20M).
+//   'sig'    = cut signature chart (winner 20%, 50 places) — only the three
+//              cut invitationals: Memorial, Arnold Palmer, Genesis.
+//   masters/pga/usopen/open = the four majors' own exact charts.
+// mcPay = flat missed-cut payment (majors only); 0 means MC earns nothing.
 const SCHED2026=[
-  ['byron nelson',     10300000,0.18,'TPC Craig Ranch','2026-05-21'],
-  ['charles schwab',    9900000,0.18,'Colonial CC','2026-05-28'],
-  ['memorial',         20000000,0.20,'Muirfield Village GC','2026-06-04',1],
-  ['canadian open',     9500000,0.18,'TPC Toronto at Osprey Valley','2026-06-11'],
-  ['u.s. open',        21500000,0.20,'Shinnecock Hills GC','2026-06-18'],
-  ['us open',          21500000,0.20,'Shinnecock Hills GC','2026-06-18'],
-  ['travelers',        20000000,0.20,'TPC River Highlands','2026-06-25',1],
-  ['john deere',        8500000,0.18,'TPC Deere Run','2026-07-02'],
-  ['scottish open',     9000000,0.18,'The Renaissance Club','2026-07-09'],
-  ['the open',         17000000,0.20,'Royal Birkdale GC','2026-07-16'],
-  ['open championship',17000000,0.20,'Royal Birkdale GC','2026-07-16'],
-  ['royal birkdale',   17000000,0.20,'Royal Birkdale GC','2026-07-16'],
-  ['3m open',           8500000,0.18,'TPC Twin Cities','2026-07-23'],
-  ['rocket mortgage',   8500000,0.18,'Detroit GC','2026-07-30'],
-  ['wyndham',           8500000,0.18,'Sedgefield CC','2026-08-06'],
-  ['st. jude',         20000000,0.18,'TPC Southwind','2026-08-13'],
-  ['bmw championship', 20000000,0.18,'Caves Valley GC','2026-08-20'],
-  ['tour championship',40000000,0.25,'East Lake GC','2026-08-27'],
-  ['masters',          22500000,0.20,'Augusta National GC','2026-04-09'],
-  ['pga championship', 20500000,0.18,'Quail Hollow Club','2026-05-14'],
-  ['players',          25000000,0.18,'TPC Sawgrass','2026-03-12'],
-  ['arnold palmer',    20000000,0.20,'Bay Hill Club','2026-03-05',1],
-  ['pebble beach',     20000000,0.20,'Pebble Beach GL','2026-02-12',1],
-  ['genesis',          20000000,0.20,'Riviera CC','2026-02-19',1],
-  ['rbc heritage',     20000000,0.20,'Harbour Town GL','2026-04-16',1],
-  ['truist',           20000000,0.20,'Quail Hollow Club','2026-05-07',1],
-  ['miami',            20000000,0.18,'Doral GC','2026-04-30'],
+  ['byron nelson',     10300000,'std',   'TPC Craig Ranch','2026-05-21',0],
+  ['charles schwab',    9900000,'std',   'Colonial CC','2026-05-28',0],
+  ['memorial',         20000000,'sig',   'Muirfield Village GC','2026-06-04',0],
+  ['canadian open',     9500000,'std',   'TPC Toronto at Osprey Valley','2026-06-11',0],
+  ['u.s. open',        21500000,'usopen','Shinnecock Hills GC','2026-06-18',10000],
+  ['us open',          21500000,'usopen','Shinnecock Hills GC','2026-06-18',10000],
+  ['travelers',        20000000,'std',   'TPC River Highlands','2026-06-25',0],
+  ['john deere',        8500000,'std',   'TPC Deere Run','2026-07-02',0],
+  ['scottish open',     9000000,'std',   'The Renaissance Club','2026-07-09',0],
+  ['the open',         17000000,'open',  'Royal Birkdale GC','2026-07-16',8750],
+  ['open championship',17000000,'open',  'Royal Birkdale GC','2026-07-16',8750],
+  ['royal birkdale',   17000000,'open',  'Royal Birkdale GC','2026-07-16',8750],
+  ['3m open',           8500000,'std',   'TPC Twin Cities','2026-07-23',0],
+  ['rocket mortgage',   8500000,'std',   'Detroit GC','2026-07-30',0],
+  ['wyndham',           8500000,'std',   'Sedgefield CC','2026-08-06',0],
+  ['st. jude',         20000000,'std',   'TPC Southwind','2026-08-13',0],
+  ['bmw championship', 20000000,'std',   'Caves Valley GC','2026-08-20',0],
+  ['masters',          22500000,'masters','Augusta National GC','2026-04-09',25000],
+  ['pga championship', 20500000,'pga',   'Aronimink GC','2026-05-14',4300],
+  ['players',          25000000,'std',   'TPC Sawgrass','2026-03-12',0],
+  ['arnold palmer',    20000000,'sig',   'Bay Hill Club','2026-03-05',0],
+  ['pebble beach',     20000000,'std',   'Pebble Beach GL','2026-02-12',0],
+  ['genesis',          20000000,'sig',   'Riviera CC','2026-02-19',0],
+  ['rbc heritage',     20000000,'std',   'Harbour Town GL','2026-04-16',0],
+  ['truist',           20000000,'std',   'Quail Hollow Club','2026-05-07',0],
+  ['miami',            20000000,'std',   'Doral GC','2026-04-30',0],
 ];
 function getTournamentInfo(name){
   const n=(name||'').toLowerCase();
-  for(const[kw,purse,wpct,venue,startDate,sig]of SCHED2026){
-    if(n.includes(kw))return{purse,wpct,venue,startDate,sig:!!sig};
+  for(const[kw,purse,curve,venue,startDate,mcPay]of SCHED2026){
+    if(n.includes(kw))return{purse,curve,venue,startDate,mcPay:mcPay||0};
   }
-  return{purse:9500000,wpct:0.18,venue:'',startDate:'',sig:false};
+  return{purse:9500000,curve:'std',venue:'',startDate:'',mcPay:0};
 }
 function getStartDay(dateStr){
   if(!dateStr)return'THURSDAY';
@@ -495,31 +516,24 @@ function getStartDay(dateStr){
   const days=['SUNDAY','MONDAY','TUESDAY','WEDNESDAY','THURSDAY','FRIDAY','SATURDAY'];
   return days[new Date(y,m-1,d).getDay()];
 }
-function calcPO(purse,winnerPct,sig){
-  // Signature events use their own steeper chart (winner 20%, paid to 50th);
-  // everything else uses the PGA standard chart (winner 18%, down to 80th).
-  // When the winner share matches the chart's own winner % (the normal case)
-  // the raw percentages are used so every position matches the official money
-  // list exactly. Only a mismatched winner share (e.g. a major at 20% on the
-  // standard chart) triggers tail renormalization as an approximation.
-  const table=sig?SIGNATURE_PCT:PAYOUT_PCT;
-  let scale=1;
-  if(Math.abs(winnerPct-table[0])>1e-9){
-    const restSum=table.slice(1).reduce((a,b)=>a+b,0);
-    scale=(1-winnerPct)/restSum;
-  }
-  return table.map((p,i)=>Math.round(purse*(i===0?winnerPct:p*scale)));
+function calcPO(purse,curveKey){
+  // Each event maps to exactly ONE verified percentage table (see CURVES).
+  // Payout = round(purse × table%). No renormalization / approximation — every
+  // position reproduces the official money list to the dollar.
+  const table=CURVES[curveKey]||PAYOUT_PCT;
+  return table.map(p=>Math.round(purse*p));
 }
 
 
 // PO is dynamic - updated when tournament is detected
-let PO=calcPO(10300000,0.18); // start with Byron Nelson
-const CUT_PAY=0;
+let PO=calcPO(10300000,'std'); // start with Byron Nelson (standard chart)
+// Flat missed-cut payment for the current event (majors only); 0 otherwise.
+let MC_PAY=0;
 
 
 function projPay(pos,tieMap){
   if(!pos||pos==='WD')return 0; // not in field
-  if(pos==='CUT')return CUT_PAY;
+  if(pos==='CUT')return MC_PAY;
   const rank=parseInt(pos.replace(/^T/,''),10);
   if(isNaN(rank))return 0;
   const n=tieMap[pos]||1;
