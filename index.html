@@ -78,6 +78,15 @@
     .footer{text-align:center;font-size:9.5px;color:#9A9A9A;padding:20px 14px 10px;font-family:'JetBrains Mono',monospace;letter-spacing:.5px}
   
 .st-search{width:100%;padding:8px 12px;border:1px solid rgba(27,58,46,.15);border-radius:8px;background:#FFFCF5;font-family:'DM Sans',sans-serif;font-size:13px;margin-bottom:8px;color:#1F1F1F;outline:none}
+    .cb-wrap{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+    .cb-chip{display:inline-flex;align-items:center;gap:6px;padding:5px 9px;border-radius:14px;color:#fff;font-size:12px;font-weight:600;cursor:pointer;border:none}
+    .cb-chip .x{font-size:12px;opacity:.85;font-weight:700}
+    .cb-sug{display:flex;align-items:center;gap:9px;padding:9px 10px;border-bottom:1px solid rgba(27,58,46,.06);cursor:pointer;font-size:13px;font-weight:500}
+    .cb-gdot{width:9px;height:9px;border-radius:2px;flex:0 0 auto}
+    .cb-gtag{margin-left:auto;color:#9A9A9A;font-size:10.5px;font-family:'JetBrains Mono',monospace}
+    .cb-warn{padding:9px 11px;border-radius:8px;background:#F6E5C7;color:#7C3F1D;font-size:12px;margin-bottom:8px;line-height:1.4}
+    .cb-count{font-size:12px;color:#7A7A7A;margin:2px 0 8px;font-weight:600}
+    .cb-hint{font-size:12.5px;color:#9A9A9A;padding:18px 8px;text-align:center;line-height:1.5}
 .strow{display:grid;grid-template-columns:36px 1fr auto;gap:8px;align-items:center;padding:7px 8px;border-bottom:1px solid rgba(27,58,46,.06)}
 .strow.st-f{border-left:3px solid var(--hl,#C9A664);padding-left:5px;background:linear-gradient(90deg,color-mix(in srgb,var(--hl) 10%,transparent),transparent)}
 .st-rnk{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;color:#9A9A9A;text-align:center}
@@ -173,6 +182,8 @@ const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'
 // ── state ─────────────────────────────────────────────────────────────────────
 // All 96 pool players - seed seen list so cut detection works from day 1
 const ALL_POOL=Object.values(POOL).flat().map(can);
+// canonical name -> proper display name (for the Combos player picker)
+const CANON2DISP={};Object.values(POOL).flat().forEach(p=>{CANON2DISP[can(p)]=p});
 // Fuzzy pool name matching: last name → first initial disambiguation
 function matchToPool(n){
   const c=can(n);
@@ -190,7 +201,7 @@ function matchToPool(n){
 }
 const S={
   team:(()=>{try{return localStorage.getItem('bz-team')||'brady'}catch{return'brady'}})(),
-  view:'board',players:[],status:'',updated:'',refreshing:false,error:null,group:null,stSearch:'',poolData:null,seen:ALL_POOL,
+  view:'board',players:[],status:'',updated:'',refreshing:false,error:null,group:null,stSearch:'',poolData:null,seen:ALL_POOL,comboSel:[],comboSearch:'',
   tournamentName:'Byron Nelson',venueName:'TPC Craig Ranch',round:1,isFinal:false,isPreTournament:false,startDate:'',nifExpanded:false
 };
 try{
@@ -645,6 +656,47 @@ function getPoolRank(teamKey){
   return found?found.rank:'—';
 }
 
+// Shared: payout map + ranked team list (used by Combos; mirrors poolHTML's math)
+function rankedTeams(){
+  const tieMap={};
+  S.players.forEach(p=>{if(p.pos&&p.pos!=='CUT'&&p.pos!=='WD')tieMap[p.pos]=(tieMap[p.pos]||0)+1});
+  const pm={};
+  S.players.forEach(p=>{pm[matchToPool(p.name)]=projPay(p.pos,tieMap)});
+  const scored=PT.map(([name,picks])=>({name,picks,earn:S.isPreTournament?0:picks.reduce((t,i)=>t+(pm[matchToPool(PL[i])]||0),0),fc:FM[name]||null}));
+  scored.sort((a,b)=>b.earn-a.earn);
+  let rank=1;scored.forEach((t,i)=>{if(i>0&&t.earn!==scored[i-1].earn)rank=i+1;t.rank=rank;});
+  return scored;
+}
+
+const icoFind=`<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>`;
+
+function combosHTML(){
+  const sel=S.comboSel;                       // array of canonical pool names
+  const q=(S.comboSearch||'').toLowerCase().trim();
+  let h=`<input class="st-search" id="cb-search" placeholder="Add a player…" value="${esc(S.comboSearch)}"/>`;
+  // selected players as removable chips, colored by group
+  if(sel.length){
+    h+=`<div class="cb-wrap">`+sel.map(c=>{const g=N2G[c];return`<span class="cb-chip" data-cbdel="${esc(c)}" style="background:${GC[g]||'#1B3A2E'}">${esc(CANON2DISP[c]||c)} <span class="x">✕</span></span>`}).join('')+`</div>`;
+  }
+  // while typing, show matching player suggestions (not already selected)
+  if(q){
+    const sug=ALL_POOL.filter(c=>!sel.includes(c)&&(CANON2DISP[c]||c).toLowerCase().includes(q)).slice(0,10);
+    h+=sug.length?sug.map(c=>{const g=N2G[c];return`<div class="cb-sug" data-cbadd="${esc(c)}"><span class="cb-gdot" style="background:${GC[g]}"></span><span>${esc(CANON2DISP[c]||c)}</span><span class="cb-gtag">G${g}</span></div>`}).join(''):`<div class="cb-hint">No players match "${esc(S.comboSearch)}".</div>`;
+    return h;
+  }
+  if(!sel.length){h+=`<div class="cb-hint">Add one or more players to see every team that has all of them.</div>`;return h;}
+  // warn if two picks are from the same group (impossible — one pick per group per team)
+  const gs=sel.map(c=>N2G[c]);
+  if(gs.some((g,i)=>gs.indexOf(g)!==i)){
+    h+=`<div class="cb-warn">⚠ Two of these players are in the same group, so no team can have both (each team has exactly one player per group).</div>`;
+  }
+  const scored=rankedTeams();
+  const matches=scored.filter(t=>sel.every(c=>t.picks.some(i=>matchToPool(PL[i])===c)));
+  h+=`<div class="cb-count">${matches.length} of ${PT.length} teams have all ${sel.length} player${sel.length>1?'s':''}</div>`;
+  h+=matches.map(t=>`<div class="strow${t.fc?' st-f':''}"${t.fc?` style="--hl:${t.fc}"`:''}><div class="st-rnk">${t.rank}</div><div class="st-nm${t.fc?' fn':''}">${esc(t.name)}</div><div class="st-sc">${fmt$(t.earn)}</div></div>`).join('');
+  return h;
+}
+
 function summaryHTML(){
   const t=TEAMS[S.team],byC={};
   S.players.forEach(p=>{const k=can(p.name),mk=matchToPool(p.name);byC[k]=p;if(mk!==k)byC[mk]=p;});
@@ -696,12 +748,13 @@ function render(){
 <div class="tsel">${Object.entries(TEAMS).map(([k,tm])=>`<button class="tbtn${S.team===k?' sel':''}" data-team="${k}" style="--tc:${tm.color}"><div class="tbtn-name">${esc(tm.short)}</div><div class="tbtn-lbl">${tm.init}</div></button>`).join('')}</div>
 ${summaryHTML()}
 <nav class="tabs">
-  <button class="tab${S.view==='board'?' active':''}" data-view="board">${icoList} Leaderboard</button>
+  <button class="tab${S.view==='board'?' active':''}" data-view="board">${icoList} Board</button>
   <button class="tab${S.view==='team'?' active':''}" data-view="team">${icoStar(S.view==='team'?'#C9A664':'currentColor')} Team</button>
   <button class="tab${S.view==='groups'?' active':''}" data-view="groups">${icoLayers} Groups</button>
   <button class="tab${S.view==='pool'?' active':''}" data-view="pool">${icoPool} Pool</button>
+  <button class="tab${S.view==='combos'?' active':''}" data-view="combos">${icoFind} Combos</button>
 </nav>
-<main class="main">${S.view==='board'?boardHTML():S.view==='team'?teamHTML():S.view==='groups'?groupsHTML():poolHTML()}</main>
+<main class="main">${S.view==='board'?boardHTML():S.view==='team'?teamHTML():S.view==='groups'?groupsHTML():S.view==='combos'?combosHTML():poolHTML()}</main>
 
 </div>`;
 
@@ -717,6 +770,18 @@ ${summaryHTML()}
     if(S.view==='pool'){ss.focus();ss.setSelectionRange(ss.value.length,ss.value.length);}
   }
 
+  const cs=document.getElementById('cb-search');
+  if(cs){
+    cs.oninput=e=>{
+      const pos=e.target.selectionStart;
+      S.comboSearch=e.target.value;
+      render();
+      const ns=document.getElementById('cb-search');
+      if(ns){ns.focus();ns.setSelectionRange(pos,pos);}
+    };
+    if(S.view==='combos'){cs.focus();cs.setSelectionRange(cs.value.length,cs.value.length);}
+  }
+
 }
 
 // ── init ──────────────────────────────────────────────────────────────────────
@@ -725,9 +790,11 @@ fetchData();
 
 // Single delegated listener - survives re-renders, reliable on mobile
 document.getElementById('root').addEventListener('click',function(e){
-  const b=e.target.closest('#rbtn,[data-team],[data-view],[data-group],[data-back],[data-nif]');
+  const b=e.target.closest('#rbtn,[data-team],[data-view],[data-group],[data-back],[data-nif],[data-cbadd],[data-cbdel]');
   if(!b)return;
   if(b.id==='rbtn'){if(!S.refreshing)fetchData();return;}
+  if(b.dataset.cbadd){if(!S.comboSel.includes(b.dataset.cbadd))S.comboSel.push(b.dataset.cbadd);S.comboSearch='';render();return;}
+  if(b.dataset.cbdel){S.comboSel=S.comboSel.filter(c=>c!==b.dataset.cbdel);render();return;}
   if(b.dataset.team){S.team=b.dataset.team;try{localStorage.setItem('bz-team',S.team)}catch{}render();return;}
   if(b.dataset.view){S.view=b.dataset.view;if(S.view==='groups')S.group=null;render();return;}
   if(b.dataset.group){S.group=+b.dataset.group;render();return;}
