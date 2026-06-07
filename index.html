@@ -623,7 +623,7 @@ function poolRoster(name,pm,byC){
     const isCut=p.pos==='CUT',n=tv(p.total),sc=isCut?'cutsc':(n<0?'under':'');
     const posCell=p.missing?'—':isCut?icoScissors:esc(p.pos);
     const right=p.missing?`<span class="th-txt">not in field</span>`:`<span class="${sc}">${esc(p.total)}</span>`;
-    return`<div class="row${isCut?' cutrow':''}${p.missing?' missing':''}"><div class="pos">${posCell}</div><div class="nc"><div class="nr"><span class="pname${isCut?' gc':''}">${esc(p.name)}</span></div><div class="mr">${gbadge(p.g)}${!isCut&&!p.missing&&p.thru?`<span class="th-txt">${esc(p.thru)}</span>`:''}${p.earn?`<span class="pr-earn">${fmt$(p.earn)}</span>`:''}</div></div><div class="sc">${right}</div></div>`;
+    return`<div class="row${isCut?' cutrow':''}${p.missing?' missing':''}"><div class="pos">${posCell}</div><div class="nc"><div class="nr"><span class="pname${isCut?' gc':''}">${esc(p.name)}</span></div><div class="mr">${!isCut&&!p.missing&&p.thru?`<span class="th-txt">${esc(p.thru)}</span>`:''}${p.earn?`<span class="pr-earn">${fmt$(p.earn)}</span>`:''}</div></div><div class="sc">${right}</div></div>`;
   }).join('')+`</div>`;
 }
 
