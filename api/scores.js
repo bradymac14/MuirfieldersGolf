@@ -29,6 +29,15 @@ export default async function handler(req, res) {
           if (typeof core?.isSignature === 'boolean') ev.isSignature = core.isSignature;
           if (core?.playoffType != null) ev.playoffType = core.playoffType;
 
+          // ESPN names the tournament champion here once the event is final.
+          // After a sudden-death playoff the participants stay tied on score,
+          // so the scoreboard alone can't say who won — this is the only
+          // authoritative signal. (ESPN's playoffType is unreliable: it read
+          // "None" for the 2026 Memorial despite Poston beating Gerard in a
+          // playoff.) The client uses winnerName to award sole 1st place.
+          const wname = core?.winner?.athlete?.displayName || core?.winner?.athlete?.fullName;
+          if (wname) ev.winnerName = wname;
+
           // Attach ESPN's live cut line/count from the tournament object.
           // ESPN computes the cut per event (it knows each event's rule:
           // signature top-50, standard top-65, the majors, or no-cut) and

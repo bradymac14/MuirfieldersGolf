@@ -314,12 +314,30 @@ function parseESPN(data){
   parsed.sort((a,b)=>a.order-b.order);
   const made=parsed.filter(p=>!p.isCut&&!p.isWD);
   const cut=parsed.filter(p=>p.isCut);
+  // A sudden-death playoff leaves its participants tied on score, so position
+  // cannot be derived from the scorecard alone. ESPN names the champion in the
+  // event's winnerName (relayed by api/scores.js, set only once final). When the
+  // leaders are tied and one of them is that champion, the champion takes sole
+  // 1st and the other tied leader(s) drop to a tie at 2nd — otherwise projPay()
+  // would split 1st+2nd money evenly across the playoff pair (e.g. the 2026
+  // Memorial paid Poston $4.0M / Gerard $2.2M, not $3.1M each).
+  const evt0=data?.events?.[0];
+  const evtFinal=(evt0?.status?.type?.completed===true)||
+    (evt0?.status?.type?.name||'').toLowerCase().includes('final');
+  const winnerKey=evt0?.winnerName?can(evt0.winnerName):'';
   let i=0;
   while(i<made.length){
     let j=i;
     while(j<made.length&&made[j].total===made[i].total)j++;
-    const lbl=(j-i)>1?'T'+(i+1):''+(i+1);
-    for(let k=i;k<j;k++)made[k].pos=lbl;
+    if(i===0&&(j-i)>1&&evtFinal&&winnerKey&&made.slice(i,j).some(p=>can(p.name)===winnerKey)){
+      const rest=[];
+      for(let k=i;k<j;k++){if(can(made[k].name)===winnerKey)made[k].pos='1';else rest.push(made[k]);}
+      const lbl2=(rest.length>1?'T':'')+'2';
+      rest.forEach(p=>p.pos=lbl2);
+    }else{
+      const lbl=(j-i)>1?'T'+(i+1):''+(i+1);
+      for(let k=i;k<j;k++)made[k].pos=lbl;
+    }
     i=j;
   }
   cut.forEach(p=>p.pos='CUT');
