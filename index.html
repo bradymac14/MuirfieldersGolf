@@ -178,8 +178,10 @@ const ALIAS={'johnny keefer':'john keefer','c bezuidenhout':'christiaan bezuiden
 function can(n){const k=norm(n);return ALIAS[k]||k}
 const N2G={};Object.entries(POOL).forEach(([g,ps])=>ps.forEach(p=>{N2G[can(p)]=+g}));
 const OWN={};Object.entries(TEAMS).forEach(([k,t])=>t.picks.forEach(p=>{const c=can(p);if(!OWN[c])OWN[c]=[];OWN[c].push(k)}));
-const getG=n=>N2G[matchToPool(n)]||null;
-const owners=n=>OWN[matchToPool(n)]||[];
+// Whitelist safeguard: only canonical names on the official pool list (ALL_POOL)
+// are ever recognized — anything else gets no group and no owner.
+const getG=n=>{const c=matchToPool(n);return ALL_POOL.includes(c)?N2G[c]:null;};
+const owners=n=>{const c=matchToPool(n);return ALL_POOL.includes(c)?(OWN[c]||[]):[];};
 const ownedBy=(n,k)=>owners(n).includes(k);
 const tv=t=>(!t||t==='E'||t==='-')?0:parseInt(t,10)||0;
 const pv=p=>{if(p==='CUT'||p==='WD')return 9999;const n=parseInt((p||'').replace(/^T/,''),10);return isNaN(n)?9998:n};
@@ -190,21 +192,13 @@ const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'
 const ALL_POOL=Object.values(POOL).flat().map(can);
 // canonical name -> proper display name (for the Combos player picker)
 const CANON2DISP={};Object.values(POOL).flat().forEach(p=>{CANON2DISP[can(p)]=p});
-// Fuzzy pool name matching: last name → first initial disambiguation
-function matchToPool(n){
-  const c=can(n);
-  if(ALL_POOL.includes(c))return c;
-  const parts=c.split(' ');
-  if(parts.length<2)return c;
-  const firstName=parts[0],last=parts[parts.length-1];
-  // Only fuzzy match abbreviated names (e.g. "C. Bezuidenhout") not full names like "Lanto Griffin"
-  if(firstName.length>2)return c;
-  const init=firstName[0];
-  const lm=ALL_POOL.filter(p=>p.split(' ').pop()===last);
-  if(lm.length===1)return lm[0];
-  if(lm.length>1){const im=lm.filter(p=>p[0]===init);if(im.length===1)return im[0];}
-  return c;
-}
+// Match an ESPN name to a pool player by its FULL normalized name (aliases applied).
+// No first-initial + last-name fuzzy fallback: that collapsed distinct players onto
+// one key (e.g. "T.K. Kim" → "Tom Kim", tagging him into Group 10 / Ben Jones's team).
+// The whitelist safeguard lives in getG()/owners(): a name is recognized only when
+// its canonical form is an actual pool player (ALL_POOL), so any ESPN name off the
+// official whitelist gets no group/owner and never appears in Groups, Team, or Combos.
+function matchToPool(n){return can(n);}
 const S={
   team:(()=>{try{return localStorage.getItem('bz-team')||'brady'}catch{return'brady'}})(),
   view:'board',players:[],status:'',updated:'',refreshing:false,error:null,group:null,stSearch:'',poolData:null,seen:ALL_POOL,comboSel:[],comboSearch:'',poolOpen:null,
