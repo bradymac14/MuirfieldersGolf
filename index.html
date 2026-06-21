@@ -199,6 +199,37 @@ const CANON2DISP={};Object.values(POOL).flat().forEach(p=>{CANON2DISP[can(p)]=p}
 // its canonical form is an actual pool player (ALL_POOL), so any ESPN name off the
 // official whitelist gets no group/owner and never appears in Groups, Team, or Combos.
 function matchToPool(n){return can(n);}
+
+// Confirmed NOT in our pool: ESPN names that share a surname with a pool player
+// but are a different person. Listed here so the coverage check below stays quiet
+// about them. (T.K. Kim is not in the pool — he was previously mis-tagged as Tom Kim.)
+const NOT_POOL=new Set(['tk kim']);
+
+// ── Weekly pool coverage check ────────────────────────────────────────────────
+// Now that matching is strict (exact full name + aliases), a real pool player whose
+// ESPN name is formatted in a new way would silently get no group/owner. To make
+// that impossible to overlook, every refresh we scan the field for any unmatched
+// ESPN competitor that shares a surname with a pool player and report it — these
+// are exactly the cases worth a human glance: either a real entrant ESPN spelled
+// differently (add an ALIAS) or a genuine namesake to add to NOT_POOL. Results are
+// logged to the console and exposed at window._app.coverage; confirmed namesakes in
+// NOT_POOL are skipped so the signal stays clean.
+function poolCoverage(players){
+  const surToPool={};
+  ALL_POOL.forEach(c=>{const s=c.split(' ').pop();(surToPool[s]=surToPool[s]||[]).push(c);});
+  const suspects=[];
+  (players||[]).forEach(p=>{
+    const c=can(p.name);
+    if(ALL_POOL.includes(c)||NOT_POOL.has(c))return; // matched, or a known non-pool namesake
+    const cand=surToPool[c.split(' ').pop()];
+    if(cand&&cand.length)suspects.push({espn:p.name,candidates:cand.map(k=>CANON2DISP[k]||k)});
+  });
+  if(suspects.length){
+    console.warn('[pool coverage] '+suspects.length+' unmatched ESPN name(s) share a surname with a pool player — review for a missing alias or namesake:');
+    suspects.forEach(s=>console.warn('  • ESPN "'+s.espn+'" → pool candidate(s): '+s.candidates.join(', ')));
+  }
+  return suspects;
+}
 const S={
   team:(()=>{try{return localStorage.getItem('bz-team')||'brady'}catch{return'brady'}})(),
   view:'board',players:[],status:'',updated:'',refreshing:false,error:null,group:null,stSearch:'',poolData:null,seen:ALL_POOL,comboSel:[],comboSearch:'',poolOpen:null,
@@ -361,6 +392,7 @@ async function fetchData(){
     const j=await r.json();const parsed=parseESPN(j);
     if(!parsed||!parsed.players.length)throw new Error('No data');
     S.players=parsed.players;S.round=parsed.round;S.isFinal=parsed.isFinal||false;S.isPreTournament=parsed.isPreTournament||false;S.error=null;
+    try{window._app.coverage=poolCoverage(parsed.players);}catch{}
     S.updated=new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
     S.status=j?.events?.[0]?.status?.type?.detail||'';
     // Save all player names ESPN ever returned (to distinguish cut vs not in field)
