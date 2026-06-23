@@ -411,7 +411,9 @@ async function fetchData(){
       const ti2=getTournamentInfo(S.tournamentName);
       const espnPurse=Number(j?.events?.[0]?.purse)||0;
       const usePurse=espnPurse>0?espnPurse:ti2.purse;
+      S.purse=usePurse;S.purseLive=espnPurse>0;S.curve=ti2.curve;
       PO=calcPO(usePurse,ti2.curve);MC_PAY=ti2.mcPay;
+      try{S.health=healthCheck();window._app.health=S.health;}catch(_){S.health=[];}
       const espnVenue=j?.events?.[0]?.competitions?.[0]?.venue?.fullName||'';
       S.venueName=espnVenue||ti2.venue||S.venueName;
       const ck2='bz-'+can(S.tournamentName).replace(/ /g,'').slice(0,18);
@@ -657,6 +659,37 @@ function payForPlayer(p,tieMap){
   return projPay(p.pos,tieMap);
 }
 
+// ── Accuracy guardrail ────────────────────────────────────────────────────────
+// Runs every refresh; warnings surface in the header (invisible when all clear)
+// and at window._app.health. These can't compare to official money mid-event (it
+// doesn't exist until final) — they verify the numbers are internally trustworthy
+// and catch the failure modes that actually bite:
+//  • live purse missing -> the app fell back to a scheduled estimate that can be
+//    stale (this silently mis-scaled the US Open), and
+//  • once the field is locked (after the cut, or a no-cut event), the money paid
+//    out should reconcile to the purse — a gross miss means a bad curve or cut.
+function healthCheck(){
+  const w=[];
+  if(S.isPreTournament||!S.players||!S.players.length)return w;
+  if(S.purseLive===false)
+    w.push('Live purse unavailable — using estimate $'+Math.round(S.purse||0).toLocaleString()+'; totals may be scaled off.');
+  // Reconcile paid money to the purse once the field is set. Skip the majors:
+  // their purse includes missed-cut stipends our pool scores as $0, so it won't
+  // tie out cleanly. (Standard + signature events pay only made-cut players.)
+  const cutApplied=S.players.some(p=>p.pos==='CUT');
+  const fieldLocked=S.isFinal||S.round>=3||cutApplied;
+  const reconcilable=(S.curve==='std'||S.curve==='sig');
+  if(fieldLocked&&reconcilable&&S.purse>0){
+    const tieMap={};
+    S.players.forEach(p=>{if(p.pos&&p.pos!=='CUT'&&p.pos!=='WD')tieMap[p.pos]=(tieMap[p.pos]||0)+1});
+    let total=0;S.players.forEach(p=>{total+=payForPlayer(p,tieMap)});
+    const off=Math.abs(total-S.purse)/S.purse;
+    if(off>0.03)
+      w.push('Payouts don’t reconcile to purse — off '+(off*100).toFixed(1)+'% (paid $'+Math.round(total).toLocaleString()+' vs purse $'+Math.round(S.purse).toLocaleString()+').');
+  }
+  return w;
+}
+
 function fmt$(v){
   if(v===0)return'—';
   return'$'+Math.round(v).toLocaleString('en-US');
@@ -840,6 +873,7 @@ function render(){
   </div>
   <div class="upd-row"><span class="dot"></span><span>${S.updated?'Live · '+S.updated:'Connecting…'}</span></div>
   ${S.error?`<div class="err">⚠ ${esc(S.error)}</div>`:''}
+  ${(S.health&&S.health.length)?S.health.map(wn=>`<div class="err">⚠ ${esc(wn)}</div>`).join(''):''}
 </header>
 <div class="tsel">${Object.entries(TEAMS).map(([k,tm])=>`<button class="tbtn${S.team===k?' sel':''}" data-team="${k}" style="--tc:${tm.color}"><div class="tbtn-name">${esc(tm.short)}</div><div class="tbtn-lbl">${tm.init}</div></button>`).join('')}</div>
 ${summaryHTML()}
