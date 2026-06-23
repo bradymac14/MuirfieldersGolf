@@ -14,13 +14,23 @@ export default async function handler(req, res) {
     try {
       const ev = data?.events?.[0];
       const eid = ev?.id;
+      // Small retry wrapper: a single transient fetch failure used to silently
+      // null the purse (it did at the US Open), and a wrong purse scales every
+      // payout. Retrying + a backup source makes the live figure far more robust.
+      const getJson = async (url, tries = 2) => {
+        for (let a = 0; a < tries; a++) {
+          try {
+            const rr = await fetch(url.replace(/^http:/, 'https:'),
+              { headers: { 'User-Agent': 'Mozilla/5.0' } });
+            if (rr.ok) return await rr.json();
+          } catch (_) { /* retry */ }
+        }
+        return null;
+      };
       if (eid) {
-        const cr = await fetch(
-          'https://sports.core.api.espn.com/v2/sports/golf/leagues/pga/events/' + eid,
-          { headers: { 'User-Agent': 'Mozilla/5.0' } }
-        );
-        if (cr.ok) {
-          const core = await cr.json();
+        const core = await getJson(
+          'https://sports.core.api.espn.com/v2/sports/golf/leagues/pga/events/' + eid);
+        if (core) {
           const purse = Number(core?.purse);
           if (purse > 0) {
             ev.purse = purse;
@@ -42,23 +52,25 @@ export default async function handler(req, res) {
           // ESPN computes the cut per event (it knows each event's rule:
           // signature top-50, standard top-65, the majors, or no-cut) and
           // updates cutScore/cutCount in real time — so we never hardcode or
-          // guess the cut. One extra hop via tournament.$ref.
-          try {
-            const tref = (core?.tournament?.$ref || '').replace(/^http:/, 'https:');
-            if (tref) {
-              const tr = await fetch(tref, { headers: { 'User-Agent': 'Mozilla/5.0' } });
-              if (tr.ok) {
-                const t = await tr.json();
-                const num = v => (v != null && !isNaN(v)) ? Number(v) : null;
-                ev.cut = {
-                  round: num(t?.cutRound),
-                  score: num(t?.cutScore),
-                  count: num(t?.cutCount),
-                  currentRound: num(t?.currentRound)
-                };
+          // guess the cut. The tournament object also carries a backup purse,
+          // used when the event object hasn't published one yet.
+          const tref = core?.tournament?.$ref || '';
+          if (tref) {
+            const t = await getJson(tref);
+            if (t) {
+              const num = v => (v != null && !isNaN(v)) ? Number(v) : null;
+              ev.cut = {
+                round: num(t?.cutRound),
+                score: num(t?.cutScore),
+                count: num(t?.cutCount),
+                currentRound: num(t?.currentRound)
+              };
+              if (!(Number(ev.purse) > 0)) {
+                const tp = Number(t?.purse);
+                if (tp > 0) { ev.purse = tp; ev.displayPurse = ev.displayPurse || t.displayPurse || null; }
               }
             }
-          } catch (_) { /* cut enrichment is optional */ }
+          }
         }
       }
     } catch (_) { /* purse enrichment is optional */ }
