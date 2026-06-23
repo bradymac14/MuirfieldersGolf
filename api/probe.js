@@ -1,78 +1,47 @@
-// TEMPORARY diagnostic endpoint — probes ESPN's APIs to find where per-player
-// prize money/earnings live, so we can wire real money into /api/scores.
-// Safe & read-only; does not touch the working /api/scores. Remove after use.
+// TEMPORARY diagnostic — v2. Dumps ESPN core competitor status + the actual
+// statistics stat names/values to find per-player prize money. Read-only.
 export default async function handler(req, res) {
   const UA = { headers: { 'User-Agent': 'Mozilla/5.0' } };
-  const out = { steps: {} };
   const get = async (url) => {
-    const r = await fetch(url, UA);
-    return { ok: r.ok, status: r.status, json: r.ok ? await r.json() : null };
+    try { const r = await fetch(url.replace(/^http:/, 'https:'), UA);
+      return r.ok ? await r.json() : { _httpError: r.status }; }
+    catch (e) { return { _err: String(e && e.message || e) }; }
   };
-  const scan = (obj) => {
-    // recursively collect any key whose name hints at money, with its value
-    const hits = [];
-    const walk = (o, path) => {
-      if (o == null || typeof o !== 'object') return;
-      for (const k of Object.keys(o)) {
-        const p = path ? path + '.' + k : k;
-        if (/earn|money|cash|prize|purse|winnings|payout/i.test(k)) {
-          const v = o[k];
-          hits.push({ path: p, value: (v && typeof v === 'object') ? '[object]' : v });
-        }
-        if (typeof o[k] === 'object') walk(o[k], p);
-      }
-    };
-    walk(obj, '');
-    return hits.slice(0, 40);
-  };
-
+  const out = {};
   try {
-    // 1) current event id from the scoreboard
     const sb = await get('https://site.api.espn.com/apis/site/v2/sports/golf/pga/scoreboard');
-    const ev = sb.json?.events?.[0];
-    const eid = ev?.id;
-    out.steps.scoreboard = { eid, name: ev?.name, status: ev?.competitions?.[0]?.status?.type?.name };
+    const eid = sb?.events?.[0]?.id;
+    out.eid = eid;
 
-    // 2) SITE leaderboard endpoint — may carry earnings inline
-    const lb = await get('https://site.web.api.espn.com/apis/site/v2/sports/golf/pga/leaderboard');
-    const lbc = lb.json?.events?.[0]?.competitions?.[0]?.competitors?.[0];
-    out.steps.siteLeaderboard = {
-      ok: lb.ok, firstCompetitorKeys: lbc ? Object.keys(lbc) : null,
-      moneyHits: lbc ? scan(lbc) : null
+    // Winner (Clark = 11119) competitor + statistics
+    const cbase = `https://sports.core.api.espn.com/v2/sports/golf/leagues/pga/events/${eid}/competitions/${eid}/competitors/11119`;
+    const comp = await get(cbase);
+    out.competitor = {
+      amateur: comp?.amateur,
+      status: comp?.status,
+      orderKeys: comp?.status ? Object.keys(comp.status) : null
     };
+    const stats = await get(cbase + '/statistics');
+    const cats = stats?.splits?.categories || stats?.categories || [];
+    out.statistics = (Array.isArray(cats) ? cats : []).map(c => ({
+      category: c.name,
+      stats: (c.stats || []).map(s => ({
+        name: s.name, displayName: s.displayName,
+        value: s.value, displayValue: s.displayValue
+      }))
+    }));
 
-    if (eid) {
-      // 3) core API competitors list
-      const base = `https://sports.core.api.espn.com/v2/sports/golf/leagues/pga/events/${eid}/competitions/${eid}/competitors`;
-      const cl = await get(base + '?limit=3');
-      const firstRef = cl.json?.items?.[0]?.$ref;
-      out.steps.coreCompetitorsList = { ok: cl.ok, count: cl.json?.count, firstRef };
-
-      if (firstRef) {
-        // 4) one competitor object
-        const comp = await get(firstRef.replace(/^http:/, 'https:'));
-        out.steps.coreCompetitor = {
-          ok: comp.ok,
-          keys: comp.json ? Object.keys(comp.json) : null,
-          moneyHits: comp.json ? scan(comp.json) : null,
-          statisticsRef: comp.json?.statistics?.$ref || null
-        };
-        // 5) that competitor's statistics
-        const sref = comp.json?.statistics?.$ref;
-        if (sref) {
-          const st = await get(sref.replace(/^http:/, 'https:'));
-          const cats = st.json?.splits?.categories || st.json?.categories;
-          out.steps.coreStatistics = {
-            ok: st.ok,
-            categoryNames: Array.isArray(cats) ? cats.map(c => c.name) : null,
-            moneyHits: st.json ? scan(st.json) : null
-          };
-        }
-      }
-    }
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.status(200).json(out);
+    // Try the SITE leaderboard (with event id) — often has earnings inline
+    const lb = await get(`https://site.web.api.espn.com/apis/site/v2/sports/golf/pga/leaderboard?event=${eid}`);
+    const lbComp = lb?.events?.[0]?.competitions?.[0]?.competitors?.[0]
+                || lb?.leaderboard?.[0];
+    out.siteLeaderboard = {
+      ok: !lb?._httpError && !lb?._err, err: lb?._httpError || lb?._err || null,
+      firstCompetitor: lbComp ? JSON.stringify(lbComp).slice(0, 1500) : null
+    };
   } catch (e) {
-    res.status(200).json({ error: String(e && e.message || e), out });
+    out.error = String(e && e.message || e);
   }
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.status(200).json(out);
 }
