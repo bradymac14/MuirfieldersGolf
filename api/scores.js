@@ -63,8 +63,52 @@ export default async function handler(req, res) {
       }
     } catch (_) { /* purse enrichment is optional */ }
 
+    // Official prize money per player. Once an event is FINAL, ESPN's core API
+    // exposes each competitor's exact official money (statistics → "amount"),
+    // which already bakes in ties and amateur forfeits to the dollar. We attach
+    // it as competitor.earnings so the client uses REAL money instead of an
+    // approximate curve — accurate for any tournament, no per-event upkeep.
+    // Only runs when final (no official money exists mid-event); best-effort and
+    // time-bounded so it can never delay or break the live scores response.
+    let moneyComplete = false;
+    try {
+      const ev = data?.events?.[0];
+      const eid = ev?.id;
+      const comp = ev?.competitions?.[0];
+      const st = comp?.status?.type;
+      const isFinal = st?.completed === true || /final/i.test(st?.name || '');
+      const cs = comp?.competitors || [];
+      if (eid && isFinal && cs.length) {
+        const base = 'https://sports.core.api.espn.com/v2/sports/golf/leagues/pga/events/'
+          + eid + '/competitions/' + eid + '/competitors';
+        const deadline = Date.now() + 7000;
+        let attached = 0, bailed = false;
+        const CONC = 24;
+        for (let i = 0; i < cs.length; i += CONC) {
+          if (Date.now() > deadline) { bailed = true; break; }
+          await Promise.all(cs.slice(i, i + CONC).map(async (c) => {
+            try {
+              const sr = await fetch(base + '/' + c.id + '/statistics',
+                { headers: { 'User-Agent': 'Mozilla/5.0' } });
+              if (!sr.ok) return;
+              const sj = await sr.json();
+              const stats = sj?.splits?.categories?.[0]?.stats
+                || sj?.categories?.[0]?.stats || [];
+              const amt = stats.find(s => s.name === 'amount' || s.name === 'officialAmount');
+              if (amt && typeof amt.value === 'number') { c.earnings = amt.value; attached++; }
+            } catch (_) { /* per-player best-effort */ }
+          }));
+        }
+        moneyComplete = !bailed && attached > 0;
+      }
+    } catch (_) { /* money enrichment is optional */ }
+
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Cache-Control', 's-maxage=30, stale-while-revalidate=60');
+    // Final results are immutable, so cache the money-enriched payload hard once
+    // it's complete; otherwise keep the short live cache.
+    res.setHeader('Cache-Control', moneyComplete
+      ? 's-maxage=3600, stale-while-revalidate=86400'
+      : 's-maxage=30, stale-while-revalidate=60');
     res.status(200).json(data);
   } catch(e) {
     res.status(500).json({ error: e.message });
