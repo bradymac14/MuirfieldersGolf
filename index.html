@@ -332,7 +332,8 @@ function parseESPN(data){
     const today=isCut?'':(activeVal!=null&&activeVal!==0?(activeLS?.displayValue||''):'-');
     const thru=(!isCut&&activeHoles>0)?(activeHoles>=18?'F':`H${activeHoles}`):'';
 
-    return{name,total,order,isCut,isWD,today,thru};
+    const earnings=(typeof c.earnings==='number')?c.earnings:null;
+    return{name,total,order,isCut,isWD,today,thru,earnings};
   });
 
   // ── Rank players ──────────────────────────────────────────────────────────
@@ -645,6 +646,17 @@ function projPay(pos,tieMap){
   return Math.round(sum/n);
 }
 
+// Per-player payout. Once the event is FINAL we use ESPN's exact official money
+// (p.earnings — already reflects ties and amateur forfeits to the dollar). Our
+// pool pays $0 for a missed cut, so cut/WD always score zero. While the event is
+// live (no official money exists yet) we fall back to the projected curve payout.
+function payForPlayer(p,tieMap){
+  if(!p)return 0;
+  if(p.pos==='CUT'||p.pos==='WD')return 0;
+  if(S.isFinal&&typeof p.earnings==='number')return p.earnings;
+  return projPay(p.pos,tieMap);
+}
+
 function fmt$(v){
   if(v===0)return'—';
   return'$'+Math.round(v).toLocaleString('en-US');
@@ -680,7 +692,7 @@ function poolHTML(){
 
   // Build pay map by player canonical name
   const pm={};
-  S.players.forEach(p=>{pm[matchToPool(p.name)]=projPay(p.pos,tieMap)});
+  S.players.forEach(p=>{pm[matchToPool(p.name)]=payForPlayer(p,tieMap)});
   // Map canonical name -> live player (for expanded rosters)
   const byC={};
   S.players.forEach(p=>{const k=can(p.name),mk=matchToPool(p.name);byC[k]=p;byC[mk]=p;});
@@ -725,7 +737,7 @@ function getPoolRank(teamKey){
   const tieMap={};
   S.players.forEach(p=>{if(p.pos&&p.pos!=='CUT'&&p.pos!=='WD')tieMap[p.pos]=(tieMap[p.pos]||0)+1});
   const pm={};
-  S.players.forEach(p=>{pm[matchToPool(p.name)]=projPay(p.pos,tieMap)});
+  S.players.forEach(p=>{pm[matchToPool(p.name)]=payForPlayer(p,tieMap)});
   const scored=PT.map(([name,picks])=>({
     name,earn:picks.reduce((t,i)=>t+(pm[matchToPool(PL[i])]||0),0)
   }));
@@ -742,7 +754,7 @@ function rankedTeams(){
   const tieMap={};
   S.players.forEach(p=>{if(p.pos&&p.pos!=='CUT'&&p.pos!=='WD')tieMap[p.pos]=(tieMap[p.pos]||0)+1});
   const pm={};
-  S.players.forEach(p=>{pm[matchToPool(p.name)]=projPay(p.pos,tieMap)});
+  S.players.forEach(p=>{pm[matchToPool(p.name)]=payForPlayer(p,tieMap)});
   const scored=PT.map(([name,picks])=>({name,picks,earn:S.isPreTournament?0:picks.reduce((t,i)=>t+(pm[matchToPool(PL[i])]||0),0),fc:FM[name]||null}));
   scored.sort((a,b)=>b.earn-a.earn);
   let rank=1;scored.forEach((t,i)=>{if(i>0&&t.earn!==scored[i-1].earn)rank=i+1;t.rank=rank;});
@@ -797,7 +809,7 @@ function summaryHTML(){
   const cut=picks.filter(p=>!p.missing&&p.pos==='CUT');
   const best=alive[0];
   const _tm={};S.players.forEach(p=>{if(p.pos&&p.pos!=='CUT'&&p.pos!=='WD')_tm[p.pos]=(_tm[p.pos]||0)+1});
-  const _pm={};S.players.forEach(p=>{_pm[matchToPool(p.name)]=projPay(p.pos,_tm)});
+  const _pm={};S.players.forEach(p=>{_pm[matchToPool(p.name)]=payForPlayer(p,_tm)});
   const _earn=S.isPreTournament?0:t.picks.reduce((tot,p)=>tot+(_pm[matchToPool(p)]||0),0);
   const projStr=_earn>0?'$'+Math.round(_earn).toLocaleString('en-US'):'—';
   return`<section class="sum"><div class="sum-ttl">${icoTrophy}<span>${esc(t.name.toUpperCase())}</span></div>
