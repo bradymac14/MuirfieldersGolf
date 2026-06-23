@@ -568,27 +568,28 @@ const CURVES={std:PAYOUT_PCT,sig:SIGNATURE_PCT,masters:MAJ_MASTERS,pga:MAJ_PGA,u
 //   'sig'    = cut signature chart (winner 20%, 50 places) — only the three
 //              cut invitationals: Memorial, Arnold Palmer, Genesis.
 //   masters/pga/usopen/open = the four majors' own exact charts.
-// mcPay = flat missed-cut payment (majors only); 0 means MC earns nothing.
+// mcPay = flat missed-cut payment. Our pool awards $0 to anyone who misses the
+// cut (only made-cut, in-the-money finishes score), so this is 0 for every event.
 const SCHED2026=[
   ['byron nelson',     10300000,'std',   'TPC Craig Ranch','2026-05-21',0],
   ['charles schwab',    9900000,'std',   'Colonial CC','2026-05-28',0],
   ['memorial',         20000000,'sig',   'Muirfield Village GC','2026-06-04',0],
   ['canadian open',     9800000,'std',   'TPC Toronto at Osprey Valley','2026-06-11',0],
-  ['u.s. open',        21500000,'usopen','Shinnecock Hills GC','2026-06-18',10000],
-  ['us open',          21500000,'usopen','Shinnecock Hills GC','2026-06-18',10000],
+  ['u.s. open',        21500000,'usopen','Shinnecock Hills GC','2026-06-18',0],
+  ['us open',          21500000,'usopen','Shinnecock Hills GC','2026-06-18',0],
   ['travelers',        20000000,'std',   'TPC River Highlands','2026-06-25',0],
   ['john deere',        8800000,'std',   'TPC Deere Run','2026-07-02',0],
   ['scottish open',     9000000,'std',   'The Renaissance Club','2026-07-09',0],
-  ['the open',         17000000,'open',  'Royal Birkdale GC','2026-07-16',8750],
-  ['open championship',17000000,'open',  'Royal Birkdale GC','2026-07-16',8750],
-  ['royal birkdale',   17000000,'open',  'Royal Birkdale GC','2026-07-16',8750],
+  ['the open',         17000000,'open',  'Royal Birkdale GC','2026-07-16',0],
+  ['open championship',17000000,'open',  'Royal Birkdale GC','2026-07-16',0],
+  ['royal birkdale',   17000000,'open',  'Royal Birkdale GC','2026-07-16',0],
   ['3m open',           8800000,'std',   'TPC Twin Cities','2026-07-23',0],
   ['rocket',           10000000,'std',   'Detroit GC','2026-07-30',0],
   ['wyndham',           8500000,'std',   'Sedgefield CC','2026-08-06',0],
   ['st. jude',         20000000,'std',   'TPC Southwind','2026-08-13',0],
   ['bmw championship', 20000000,'std',   'Caves Valley GC','2026-08-20',0],
-  ['masters',          22500000,'masters','Augusta National GC','2026-04-09',25000],
-  ['pga championship', 20500000,'pga',   'Aronimink GC','2026-05-14',4300],
+  ['masters',          22500000,'masters','Augusta National GC','2026-04-09',0],
+  ['pga championship', 20500000,'pga',   'Aronimink GC','2026-05-14',0],
   ['players',          25000000,'std',   'TPC Sawgrass','2026-03-12',0],
   ['arnold palmer',    20000000,'sig',   'Bay Hill Club','2026-03-05',0],
   ['pebble beach',     20000000,'std',   'Pebble Beach GL','2026-02-12',0],
@@ -621,7 +622,8 @@ function calcPO(purse,curveKey){
 
 // PO is dynamic - updated when tournament is detected
 let PO=calcPO(10300000,'std'); // start with Byron Nelson (standard chart)
-// Flat missed-cut payment for the current event (majors only); 0 otherwise.
+// Flat missed-cut payment for the current event. Our pool pays $0 for a missed
+// cut at every event (mcPay is 0 across SCHED2026), so this stays 0.
 let MC_PAY=0;
 
 
