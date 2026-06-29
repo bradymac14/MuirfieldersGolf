@@ -247,6 +247,25 @@ try{
   }}
 }catch{}
 
+// ── Authoritative winner override ───────────────────────────────────────────
+// ESPN only fills winnerName once it flips an event to Final AND publishes the
+// champion. After a Monday playoff that followed a darkness suspension, the event
+// can sit "Suspended" (or Final-without-winner) for hours while the leaders read
+// as a tied T1 — during which projPay() splits 1st+2nd evenly across the playoff
+// pair (e.g. it paid the Travelers champion the $2.89M split instead of the real
+// $3.6M, shorting every team holding him by $710K). Pin the confirmed champion
+// here and they take sole 1st immediately, even before ESPN catches up. ESPN's own
+// winnerName still takes precedence when present; remove an entry once the event
+// rolls off the scoreboard. Matched by tournament-name keyword.
+const WINNER_OVERRIDE=[
+  ['travelers','Viktor Hovland'],   // 2026 Travelers: Hovland def. Scheffler in a Monday playoff
+];
+function overrideWinner(tname){
+  const n=(tname||'').toLowerCase();
+  for(const[kw,w]of WINNER_OVERRIDE)if(n.includes(kw))return w;
+  return'';
+}
+
 // ── ESPN parse ────────────────────────────────────────────────────────────────
 function parseESPN(data){
   const comp=data?.events?.[0]?.competitions?.[0];if(!comp)return null;
@@ -350,12 +369,18 @@ function parseESPN(data){
   const evt0=data?.events?.[0];
   const evtFinal=(evt0?.status?.type?.completed===true)||
     (evt0?.status?.type?.name||'').toLowerCase().includes('final');
-  const winnerKey=evt0?.winnerName?can(evt0.winnerName):'';
+  // ESPN's published champion wins; a manual override fills the gap while ESPN lags
+  // on a playoff result. An override is authoritative even before the event is Final
+  // (the playoff only moves the top two — the rest of the field is already at 72).
+  const tname=evt0?.shortName||evt0?.name||'';
+  const ovW=overrideWinner(tname);
+  const winnerKey=evt0?.winnerName?can(evt0.winnerName):(ovW?can(ovW):'');
+  const winnerAuthoritative=evtFinal||!!ovW;
   let i=0;
   while(i<made.length){
     let j=i;
     while(j<made.length&&made[j].total===made[i].total)j++;
-    if(i===0&&(j-i)>1&&evtFinal&&winnerKey&&made.slice(i,j).some(p=>can(p.name)===winnerKey)){
+    if(i===0&&(j-i)>1&&winnerAuthoritative&&winnerKey&&made.slice(i,j).some(p=>can(p.name)===winnerKey)){
       const rest=[];
       for(let k=i;k<j;k++){if(can(made[k].name)===winnerKey)made[k].pos='1';else rest.push(made[k]);}
       const lbl2=(rest.length>1?'T':'')+'2';
@@ -413,7 +438,15 @@ async function fetchData(){
       const usePurse=espnPurse>0?espnPurse:ti2.purse;
       S.purse=usePurse;S.purseLive=espnPurse>0;S.curve=ti2.curve;
       PO=calcPO(usePurse,ti2.curve);MC_PAY=ti2.mcPay;
-      try{S.health=healthCheck();window._app.health=S.health;}catch(_){S.health=[];}
+      try{
+        S.health=healthCheck();
+        // An unmatched ESPN name that shares a surname with a pool player scores $0
+        // for every team holding them (the old T.K. Kim failure) — promote that
+        // signal out of the console and into the header so it can't be missed.
+        const cov=window._app.coverage||[];
+        if(cov.length)S.health=cov.map(s=>'Unmatched golfer "'+s.espn+'" — scoring $0; pool candidate(s): '+s.candidates.join(', ')+' (add an ALIAS or NOT_POOL entry)').concat(S.health);
+        window._app.health=S.health;
+      }catch(_){S.health=[];}
       const espnVenue=j?.events?.[0]?.competitions?.[0]?.venue?.fullName||'';
       S.venueName=espnVenue||ti2.venue||S.venueName;
       const ck2='bz-'+can(S.tournamentName).replace(/ /g,'').slice(0,18);
