@@ -233,7 +233,7 @@ function poolCoverage(players){
 const S={
   team:(()=>{try{return localStorage.getItem('bz-team')||'brady'}catch{return'brady'}})(),
   view:'board',players:[],status:'',updated:'',refreshing:false,error:null,group:null,stSearch:'',poolData:null,seen:ALL_POOL,comboSel:[],comboSearch:'',poolOpen:null,
-  tournamentName:'Byron Nelson',venueName:'TPC Craig Ranch',round:1,isFinal:false,isPreTournament:false,startDate:'',nifExpanded:false
+  tournamentName:'Byron Nelson',venueName:'TPC Craig Ranch',round:1,isFinal:false,moneyComplete:false,officialFinal:false,isPreTournament:false,startDate:'',nifExpanded:false
 };
 try{
   const ck=localStorage.getItem('bz-current-key');
@@ -438,6 +438,23 @@ async function fetchData(){
       const usePurse=espnPurse>0?espnPurse:ti2.purse;
       S.purse=usePurse;S.purseLive=espnPurse>0;S.curve=ti2.curve;
       PO=calcPO(usePurse,ti2.curve);MC_PAY=ti2.mcPay;
+      // ── Gate the "FINAL"/official state ──────────────────────────────────────
+      // ESPN can flip an event to Final BEFORE it publishes per-player money and a
+      // playoff champion (exactly the window that priced the Travelers champion as
+      // a $2.89M split T1). So don't trust "Final" alone. Treat results as official
+      // only when: ESPN says final, EVERY in-the-money golfer has a money figure,
+      // and the payouts reconcile to the purse. Until then it's "Finalizing…".
+      // moneyComplete also drives payForPlayer so payouts are all-or-nothing — all
+      // real ESPN money, or all projected curve, never a mix of the two.
+      const madeP=S.players.filter(p=>p.pos&&p.pos!=='CUT'&&p.pos!=='WD');
+      S.moneyComplete=S.isFinal&&madeP.length>0&&madeP.every(p=>typeof p.earnings==='number');
+      let reconciledOK=true;
+      if((S.curve==='std'||S.curve==='sig')&&S.purse>0){
+        const tmR={};S.players.forEach(p=>{if(p.pos&&p.pos!=='CUT'&&p.pos!=='WD')tmR[p.pos]=(tmR[p.pos]||0)+1});
+        let totR=0;S.players.forEach(p=>{totR+=payForPlayer(p,tmR)});
+        reconciledOK=Math.abs(totR-S.purse)/S.purse<=0.03;
+      }
+      S.officialFinal=S.isFinal&&S.moneyComplete&&reconciledOK;
       try{
         S.health=healthCheck();
         // An unmatched ESPN name that shares a surname with a pool player scores $0
@@ -681,14 +698,15 @@ function projPay(pos,tieMap){
   return Math.round(sum/n);
 }
 
-// Per-player payout. Once the event is FINAL we use ESPN's exact official money
-// (p.earnings — already reflects ties and amateur forfeits to the dollar). Our
-// pool pays $0 for a missed cut, so cut/WD always score zero. While the event is
-// live (no official money exists yet) we fall back to the projected curve payout.
+// Per-player payout. We switch to ESPN's exact official money (p.earnings — already
+// reflects ties and amateur forfeits to the dollar) only once the WHOLE field's
+// money has landed (S.moneyComplete), so we never mix real money for some golfers
+// with projected money for others mid-finalize. Our pool pays $0 for a missed cut,
+// so cut/WD always score zero. Otherwise we use the projected curve payout.
 function payForPlayer(p,tieMap){
   if(!p)return 0;
   if(p.pos==='CUT'||p.pos==='WD')return 0;
-  if(S.isFinal&&typeof p.earnings==='number')return p.earnings;
+  if(S.moneyComplete&&typeof p.earnings==='number')return p.earnings;
   return projPay(p.pos,tieMap);
 }
 
@@ -890,7 +908,7 @@ function summaryHTML(){
   <div><div class="slbl">Top Score</div><div class="sval">${best?esc(best.total):'—'}</div></div>
   <div><div class="slbl">Alive</div><div class="sval">${alive.length}<span style="font-size:13px;color:#9A9A9A">/${t.picks.length}</span></div></div>
   <div><div class="slbl">Pool Rank</div><div class="sval">#${getPoolRank(S.team)}</div></div>
-  <div><div class="slbl">Projected</div><div class="sval">${projStr}</div></div>
+  <div><div class="slbl">${S.officialFinal?'Prize Money':'Projected'}</div><div class="sval">${projStr}</div></div>
 </div></section>`;
 }
 
@@ -904,7 +922,7 @@ function render(){
 <header class="hdr">
   <div class="hdr-row">
     <div>
-      <div class="kicker">${S.isFinal?`<span class="final-kicker">${esc(S.tournamentName.toUpperCase())}<span class="final-tag">FINAL</span></span>`:S.isPreTournament?`${esc(S.tournamentName.toUpperCase())} · STARTS ${getStartDay(S.startDate)}`:`${esc(S.tournamentName.toUpperCase())} · ROUND ${S.round}`}</div>
+      <div class="kicker">${S.officialFinal?`<span class="final-kicker">${esc(S.tournamentName.toUpperCase())}<span class="final-tag">FINAL</span></span>`:S.isFinal?`<span class="final-kicker">${esc(S.tournamentName.toUpperCase())}<span class="final-tag" style="background:rgba(154,154,154,.16);border-color:rgba(154,154,154,.4);color:#9A9A9A">FINALIZING…</span></span>`:S.isPreTournament?`${esc(S.tournamentName.toUpperCase())} · STARTS ${getStartDay(S.startDate)}`:`${esc(S.tournamentName.toUpperCase())} · ROUND ${S.round}`}</div>
       <h1 class="title">Muirfielders</h1>
       <div class="subtitle">${esc(S.venueName)}</div>
     </div>
