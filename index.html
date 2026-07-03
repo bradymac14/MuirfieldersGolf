@@ -200,37 +200,49 @@ const CANON2DISP={};Object.values(POOL).flat().forEach(p=>{CANON2DISP[can(p)]=p}
 // official whitelist gets no group/owner and never appears in Groups, Team, or Combos.
 function matchToPool(n){return can(n);}
 
-// Confirmed NOT in our pool: ESPN names that share a surname with a pool player
-// but are a different person. Listed here so the coverage check below stays quiet
-// about them — they correctly score $0 (no team holds them). NEVER alias these to
-// the pool player; that would fold a stranger's money onto the wrong golfer.
-// (T.K. Kim is not in the pool — he was previously mis-tagged as Tom Kim.)
-//   • Lanto Griffin ≠ Ben Griffin   • Chan Kim ≠ Michael/Si Woo/Tom Kim
-//   • Carson Young ≠ Cameron Young  (all John Deere 2026 field namesakes)
-const NOT_POOL=new Set(['tk kim','lanto griffin','chan kim','carson young']);
+// Explicit non-pool namesakes. The coverage check below now auto-classifies
+// same-surname strangers by first name, so this list is rarely needed — it's just
+// a manual escape hatch for an odd case the heuristic can't tell apart. (T.K. Kim
+// shares a first initial region with the pool Kims; pinning it here is belt-and-
+// suspenders. Lanto Griffin, Chan Kim, Carson Young etc. are handled automatically.)
+const NOT_POOL=new Set(['tk kim']);
 
 // ── Weekly pool coverage check ────────────────────────────────────────────────
-// Now that matching is strict (exact full name + aliases), a real pool player whose
-// ESPN name is formatted in a new way would silently get no group/owner. To make
-// that impossible to overlook, every refresh we scan the field for any unmatched
-// ESPN competitor that shares a surname with a pool player and report it — these
-// are exactly the cases worth a human glance: either a real entrant ESPN spelled
-// differently (add an ALIAS) or a genuine namesake to add to NOT_POOL. Results are
-// logged to the console and exposed at window._app.coverage; confirmed namesakes in
-// NOT_POOL are skipped so the signal stays clean.
+// Strict matching (exact full name + aliases) means a real pool player whose ESPN
+// name is formatted a new way would silently score $0. We still want to catch THAT,
+// but not nag about the far more common case: a totally different golfer who merely
+// shares a surname with a pool pick (Lanto Griffin vs Ben Griffin, Chan Kim vs the
+// pool Kims, Carson Young vs Cameron Young). Those are harmless — no team holds them,
+// so $0 is correct — and the app now classifies them automatically instead of asking
+// for a NOT_POOL entry every week.
+//
+// Rule: an unmatched ESPN name is only worth surfacing when it's plausibly the SAME
+// person as a pool pick who is otherwise going unscored — i.e. same surname AND a
+// compatible first name (identical, or one a nickname/prefix of the other, e.g.
+// Min Woo/Minwoo, Byeong Hun/Byeong-Hun, Cam/Cameron) AND that pool pick isn't
+// already matched in the field. Different first name => different person => silent.
+function firstNameCompatible(a,b){           // a,b canonical full names
+  const af=a.split(' ')[0],bf=b.split(' ')[0];
+  if(af===bf)return true;                    // same first name (surname likely misspelled)
+  if(af.length>=3&&bf.length>=3&&(af.startsWith(bf)||bf.startsWith(af)))return true; // Cam/Cameron
+  return false;                              // clearly different people
+}
 function poolCoverage(players){
   const surToPool={};
   ALL_POOL.forEach(c=>{const s=c.split(' ').pop();(surToPool[s]=surToPool[s]||[]).push(c);});
+  const present=new Set((players||[]).map(p=>can(p.name)).filter(c=>ALL_POOL.includes(c)));
   const suspects=[];
   (players||[]).forEach(p=>{
     const c=can(p.name);
     if(ALL_POOL.includes(c)||NOT_POOL.has(c))return; // matched, or a known non-pool namesake
-    const cand=surToPool[c.split(' ').pop()];
-    if(cand&&cand.length)suspects.push({espn:p.name,candidates:cand.map(k=>CANON2DISP[k]||k)});
+    const cand=surToPool[c.split(' ').pop()]||[];
+    // Keep only candidates that could genuinely be this same person unscored.
+    const risk=cand.filter(pc=>firstNameCompatible(c,pc)&&!present.has(pc));
+    if(risk.length)suspects.push({espn:p.name,candidates:risk.map(k=>CANON2DISP[k]||k)});
   });
   if(suspects.length){
-    console.warn('[pool coverage] '+suspects.length+' unmatched ESPN name(s) share a surname with a pool player — review for a missing alias or namesake:');
-    suspects.forEach(s=>console.warn('  • ESPN "'+s.espn+'" → pool candidate(s): '+s.candidates.join(', ')));
+    console.warn('[pool coverage] '+suspects.length+' unmatched ESPN name(s) may be a mis-spelled pool pick:');
+    suspects.forEach(s=>console.warn('  • ESPN "'+s.espn+'" → likely pool pick: '+s.candidates.join(', ')));
   }
   return suspects;
 }
