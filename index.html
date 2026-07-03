@@ -706,11 +706,17 @@ function healthCheck(){
   if(S.isPreTournament||!S.players||!S.players.length)return w;
   if(S.purseLive===false)
     w.push('Live purse unavailable — using estimate $'+Math.round(S.purse||0).toLocaleString()+'; totals may be scaled off.');
-  // Reconcile paid money to the purse once the field is set. Skip the majors:
+  // Reconcile paid money to the purse once the field is LOCKED. Skip the majors:
   // their purse includes missed-cut stipends our pool scores as $0, so it won't
   // tie out cleanly. (Standard + signature events pay only made-cut players.)
-  const cutApplied=S.players.some(p=>p.pos==='CUT');
-  const fieldLocked=S.isFinal||S.round>=3||cutApplied;
+  //
+  // "Locked" = final, or the cut is official (Round 3 has begun). We deliberately
+  // do NOT treat a live Round-2 projected cut as locked: mid-round the projected
+  // made-field is larger and looser than the eventual cut, and the "floor beyond
+  // 80th" payouts push the sum a few % past the purse — a false alarm every cut
+  // Saturday. Once R3 data exists the made-cut field is settled and the check is
+  // meaningful again.
+  const fieldLocked=S.isFinal||S.round>=3;
   const reconcilable=(S.curve==='std'||S.curve==='sig');
   if(fieldLocked&&reconcilable&&S.purse>0){
     const tieMap={};
