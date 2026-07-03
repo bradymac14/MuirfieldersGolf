@@ -202,8 +202,12 @@ function matchToPool(n){return can(n);}
 
 // Confirmed NOT in our pool: ESPN names that share a surname with a pool player
 // but are a different person. Listed here so the coverage check below stays quiet
-// about them. (T.K. Kim is not in the pool — he was previously mis-tagged as Tom Kim.)
-const NOT_POOL=new Set(['tk kim']);
+// about them — they correctly score $0 (no team holds them). NEVER alias these to
+// the pool player; that would fold a stranger's money onto the wrong golfer.
+// (T.K. Kim is not in the pool — he was previously mis-tagged as Tom Kim.)
+//   • Lanto Griffin ≠ Ben Griffin   • Chan Kim ≠ Michael/Si Woo/Tom Kim
+//   • Carson Young ≠ Cameron Young  (all John Deere 2026 field namesakes)
+const NOT_POOL=new Set(['tk kim','lanto griffin','chan kim','carson young']);
 
 // ── Weekly pool coverage check ────────────────────────────────────────────────
 // Now that matching is strict (exact full name + aliases), a real pool player whose
