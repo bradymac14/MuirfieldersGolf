@@ -740,19 +740,16 @@ function healthCheck(){
   if(S.isPreTournament||!S.players||!S.players.length)return w;
   if(S.purseLive===false)
     w.push('Live purse unavailable — using estimate $'+Math.round(S.purse||0).toLocaleString()+'; totals may be scaled off.');
-  // Reconcile paid money to the purse once the field is LOCKED. Skip the majors:
-  // their purse includes missed-cut stipends our pool scores as $0, so it won't
-  // tie out cleanly. (Standard + signature events pay only made-cut players.)
-  //
-  // "Locked" = final, or the cut is official (Round 3 has begun). We deliberately
-  // do NOT treat a live Round-2 projected cut as locked: mid-round the projected
-  // made-field is larger and looser than the eventual cut, and the "floor beyond
-  // 80th" payouts push the sum a few % past the purse — a false alarm every cut
-  // Saturday. Once R3 data exists the made-cut field is settled and the check is
-  // meaningful again.
-  const fieldLocked=S.isFinal||S.round>=3;
+  // Reconcile paid money to the purse — but ONLY against real ESPN money
+  // (moneyComplete). The projected curve is a deliberate approximation: our std
+  // table sums to ~103.4% of a purse and the signature table to ~101.7% (the
+  // per-position dollars match the official chart — winner 18% etc. — but the full
+  // table over-distributes), so reconciling a projected full field ALWAYS reads a
+  // few % over and would false-alarm every locked round. Real official money sums
+  // to the purse to the dollar, so that's the only total worth checking. Skip the
+  // majors: their purse includes missed-cut stipends our pool scores as $0.
   const reconcilable=(S.curve==='std'||S.curve==='sig');
-  if(fieldLocked&&reconcilable&&S.purse>0){
+  if(S.moneyComplete&&reconcilable&&S.purse>0){
     const tieMap={};
     S.players.forEach(p=>{if(p.pos&&p.pos!=='CUT'&&p.pos!=='WD')tieMap[p.pos]=(tieMap[p.pos]||0)+1});
     let total=0;S.players.forEach(p=>{total+=payForPlayer(p,tieMap)});
