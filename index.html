@@ -174,7 +174,7 @@ const GC={1:"#7C3F1D",2:"#A85B2A",3:"#C97B3F",4:"#3D5A4A",5:"#5C7A5E",6:"#7E946D
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 function norm(n){return(n||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\./g,'').replace(/\s+/g,' ').trim()}
-const ALIAS={'johnny keefer':'john keefer','c bezuidenhout':'christiaan bezuidenhout','m thorbjornsen':'michael thorbjornsen'};
+const ALIAS={'johnny keefer':'john keefer','c bezuidenhout':'christiaan bezuidenhout','m thorbjornsen':'michael thorbjornsen','cam davis':'cameron davis'};
 function can(n){const k=norm(n);return ALIAS[k]||k}
 const N2G={};Object.entries(POOL).forEach(([g,ps])=>ps.forEach(p=>{N2G[can(p)]=+g}));
 const OWN={};Object.entries(TEAMS).forEach(([k,t])=>t.picks.forEach(p=>{const c=can(p);if(!OWN[c])OWN[c]=[];OWN[c].push(k)}));
