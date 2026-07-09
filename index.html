@@ -175,7 +175,12 @@ const GC={1:"#7C3F1D",2:"#A85B2A",3:"#C97B3F",4:"#3D5A4A",5:"#5C7A5E",6:"#7E946D
 // ── helpers ──────────────────────────────────────────────────────────────────
 function norm(n){return(n||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\./g,'').replace(/\s+/g,' ').trim()}
 const ALIAS={'johnny keefer':'john keefer','c bezuidenhout':'christiaan bezuidenhout','m thorbjornsen':'michael thorbjornsen','cam davis':'cameron davis'};
-function can(n){const k=norm(n);return ALIAS[k]||k}
+// DYN_ALIAS is rebuilt every refresh by resolveField() from the live field: it maps
+// an ESPN name that is confidently the SAME person as an otherwise-unscored pool
+// pick (nickname/initial + unique surname) onto that pick — so the app self-services
+// spelling variants with no manual alias. Manual ALIAS always wins over it.
+let DYN_ALIAS={};
+function can(n){const k=norm(n);return ALIAS[k]||DYN_ALIAS[k]||k}
 const N2G={};Object.entries(POOL).forEach(([g,ps])=>ps.forEach(p=>{N2G[can(p)]=+g}));
 const OWN={};Object.entries(TEAMS).forEach(([k,t])=>t.picks.forEach(p=>{const c=can(p);if(!OWN[c])OWN[c]=[];OWN[c].push(k)}));
 // Whitelist safeguard: only canonical names on the official pool list (ALL_POOL)
@@ -207,44 +212,49 @@ function matchToPool(n){return can(n);}
 // suspenders. Lanto Griffin, Chan Kim, Carson Young etc. are handled automatically.)
 const NOT_POOL=new Set(['tk kim']);
 
-// ── Weekly pool coverage check ────────────────────────────────────────────────
-// Strict matching (exact full name + aliases) means a real pool player whose ESPN
-// name is formatted a new way would silently score $0. We still want to catch THAT,
-// but not nag about the far more common case: a totally different golfer who merely
-// shares a surname with a pool pick (Lanto Griffin vs Ben Griffin, Chan Kim vs the
-// pool Kims, Carson Young vs Cameron Young). Those are harmless — no team holds them,
-// so $0 is correct — and the app now classifies them automatically instead of asking
-// for a NOT_POOL entry every week.
+// ── Field auto-resolver (self-servicing, no manual upkeep) ─────────────────────
+// Strict exact matching (ALIAS + full name) runs first. resolveField then handles
+// the only remaining case that costs money: an ESPN name that doesn't match but is
+// unmistakably one of our picks spelled/shortened differently (Cam→Cameron,
+// C→Christiaan, Minwoo→Min Woo). It maps those onto the pick via DYN_ALIAS so they
+// score correctly — with no banner and no edit from anyone.
 //
-// Rule: an unmatched ESPN name is only worth surfacing when it's plausibly the SAME
-// person as a pool pick who is otherwise going unscored — i.e. same surname AND a
-// compatible first name (identical, or one a nickname/prefix of the other, e.g.
-// Min Woo/Minwoo, Byeong Hun/Byeong-Hun, Cam/Cameron) AND that pool pick isn't
-// already matched in the field. Different first name => different person => silent.
+// Safety rails so a STRANGER is never scored onto a pick (the old T.K. Kim failure):
+// resolve only when the surname maps to exactly ONE pool pick, the first names are
+// compatible (nickname/initial), and that pick isn't already in the field under
+// another name. A clearly different first name (Lanto vs Ben, Carson vs Cameron)
+// is never compatible, so genuine namesakes stay $0 as they should. A truly
+// ambiguous case (>1 viable pick) is left unresolved ($0 — the safe default) and
+// logged to the console rather than guessed.
 function firstNameCompatible(a,b){           // a,b canonical full names
   const af=a.split(' ')[0],bf=b.split(' ')[0];
-  if(af===bf)return true;                    // same first name (surname likely misspelled)
-  if(af.length>=3&&bf.length>=3&&(af.startsWith(bf)||bf.startsWith(af)))return true; // Cam/Cameron
-  return false;                              // clearly different people
+  if(af===bf)return true;                                        // same first name
+  if(af.length===1&&bf.startsWith(af))return true;              // "C" -> Christiaan
+  if(bf.length===1&&af.startsWith(bf))return true;              // Christiaan <- "C"
+  if(af.length>=3&&bf.length>=3&&(af.startsWith(bf)||bf.startsWith(af)))return true; // Cam/Cameron, John/Johnny
+  return false;                                                 // clearly different people
 }
-function poolCoverage(players){
+function resolveField(players){
+  DYN_ALIAS={};
   const surToPool={};
   ALL_POOL.forEach(c=>{const s=c.split(' ').pop();(surToPool[s]=surToPool[s]||[]).push(c);});
-  const present=new Set((players||[]).map(p=>can(p.name)).filter(c=>ALL_POOL.includes(c)));
-  const suspects=[];
+  // Pool picks already matched exactly (so we never double-map onto them).
+  const taken=new Set();
+  (players||[]).forEach(p=>{const k=norm(p.name);const c=ALIAS[k]||k;if(ALL_POOL.includes(c))taken.add(c);});
+  const ambiguous=[];
   (players||[]).forEach(p=>{
-    const c=can(p.name);
-    if(ALL_POOL.includes(c)||NOT_POOL.has(c))return; // matched, or a known non-pool namesake
-    const cand=surToPool[c.split(' ').pop()]||[];
-    // Keep only candidates that could genuinely be this same person unscored.
-    const risk=cand.filter(pc=>firstNameCompatible(c,pc)&&!present.has(pc));
-    if(risk.length)suspects.push({espn:p.name,candidates:risk.map(k=>CANON2DISP[k]||k)});
+    const k=norm(p.name);const c=ALIAS[k]||k;
+    if(ALL_POOL.includes(c)||NOT_POOL.has(c))return;             // matched, or a known stranger
+    const cand=(surToPool[c.split(' ').pop()]||[])
+      .filter(pc=>!taken.has(pc)&&firstNameCompatible(c,pc));    // same person, still unscored
+    if(cand.length===1){DYN_ALIAS[k]=cand[0];taken.add(cand[0]);}
+    else if(cand.length>1)ambiguous.push({espn:p.name,candidates:cand.map(x=>CANON2DISP[x]||x)});
   });
-  if(suspects.length){
-    console.warn('[pool coverage] '+suspects.length+' unmatched ESPN name(s) may be a mis-spelled pool pick:');
-    suspects.forEach(s=>console.warn('  • ESPN "'+s.espn+'" → likely pool pick: '+s.candidates.join(', ')));
+  if(ambiguous.length){
+    console.warn('[resolveField] '+ambiguous.length+' ambiguous ESPN name(s) left unscored (safe default):');
+    ambiguous.forEach(s=>console.warn('  • ESPN "'+s.espn+'" → could be: '+s.candidates.join(', ')));
   }
-  return suspects;
+  return ambiguous;
 }
 const S={
   team:(()=>{try{return localStorage.getItem('bz-team')||'brady'}catch{return'brady'}})(),
@@ -434,7 +444,10 @@ async function fetchData(){
     const j=await r.json();const parsed=parseESPN(j);
     if(!parsed||!parsed.players.length)throw new Error('No data');
     S.players=parsed.players;S.round=parsed.round;S.isFinal=parsed.isFinal||false;S.isPreTournament=parsed.isPreTournament||false;S.error=null;
-    try{window._app.coverage=poolCoverage(parsed.players);}catch{}
+    // Auto-resolve spelling/nickname variants to pool picks BEFORE any scoring or
+    // rendering (sets DYN_ALIAS). Only truly ambiguous names are returned, and those
+    // are console-logged, not bannered.
+    try{window._app.coverage=resolveField(parsed.players);}catch{}
     S.updated=new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
     S.status=j?.events?.[0]?.status?.type?.detail||'';
     // Save all player names ESPN ever returned (to distinguish cut vs not in field)
@@ -471,15 +484,7 @@ async function fetchData(){
         reconciledOK=Math.abs(totR-S.purse)/S.purse<=0.03;
       }
       S.officialFinal=S.isFinal&&S.moneyComplete&&reconciledOK;
-      try{
-        S.health=healthCheck();
-        // An unmatched ESPN name that shares a surname with a pool player scores $0
-        // for every team holding them (the old T.K. Kim failure) — promote that
-        // signal out of the console and into the header so it can't be missed.
-        const cov=window._app.coverage||[];
-        if(cov.length)S.health=cov.map(s=>'Unmatched golfer "'+s.espn+'" — scoring $0; pool candidate(s): '+s.candidates.join(', ')+' (add an ALIAS or NOT_POOL entry)').concat(S.health);
-        window._app.health=S.health;
-      }catch(_){S.health=[];}
+      try{S.health=healthCheck();window._app.health=S.health;}catch(_){S.health=[];}
       const espnVenue=j?.events?.[0]?.competitions?.[0]?.venue?.fullName||'';
       S.venueName=espnVenue||ti2.venue||S.venueName;
       const ck2='bz-'+can(S.tournamentName).replace(/ /g,'').slice(0,18);
