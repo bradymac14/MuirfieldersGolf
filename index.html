@@ -330,17 +330,30 @@ function parseESPN(data){
   const cutLineActive=!isR3Plus && !!espnCut && espnCut.score!=null && espnCut.round!=null
     && espnCut.currentRound!=null && espnCut.currentRound>espnCut.round
     && espnCut.count!=null && espnCut.count>0 && espnCut.count<cs.length;
-  // Floating / projected cut line: the SAME ESPN cut line, shown LIVE during a cut
-  // round without the official gate (this is how the PGA/ESPN apps show it). Players
-  // worse than it are "projected to miss" — we do NOT wipe their score or call them
-  // CUT (they can still climb back); we just draw the line and zero their PROJECTED
-  // pay, since they aren't currently in the money.
-  const projCutActive=!isR3Plus && !!espnCut && espnCut.score!=null && espnCut.round!=null
+  // Floating / projected cut line: shown LIVE during a cut round without the official
+  // gate (this is how the PGA/ESPN apps show it). Players worse than it are "projected
+  // to miss" — we do NOT wipe their score or call them CUT (they can still climb back);
+  // we just draw the line and zero their PROJECTED pay, since they aren't in the money.
+  const projCutActive=!isR3Plus && !!espnCut && espnCut.round!=null
     && espnCut.count!=null && espnCut.count>0 && espnCut.count<cs.length;
-  const projCutScore=projCutActive?espnCut.score:null;
   const parScore=v=>{const s=String(v==null?'':v).toUpperCase().trim();
     if(s==='E')return 0;if(!s||s==='CUT'||s==='MC'||s==='WD'||s==='DQ')return null;
     const n=parseInt(s.replace('+',''),10);return isNaN(n)?null:n;};
+  // Compute the line from the LIVE standings — "top N and ties", where N = ESPN's
+  // cutCount (the event's rule: 65 standard, 50 signature, etc.). The line is the
+  // Nth-best player's score; anyone strictly worse is projected out (ties at the line
+  // make it). We derive it from the field rather than trust ESPN's cutScore field,
+  // which can read a stroke off — it showed -2 at the Scottish Open while the 65th man
+  // (and the PGA/ESPN leaderboards) sat at -1.
+  let projCutScore=null;
+  if(projCutActive){
+    const isWDc=c=>{const sn=(c.status?.type?.name||'').toLowerCase();
+      const sd=(c.status?.type?.shortDetail||c.status?.displayValue||'').toLowerCase();
+      const sv=(c.score||'').toUpperCase();
+      return sn.includes('withdraw')||sn==='wd'||sd.includes('wd')||sv==='WD'||sv==='DQ';};
+    const pars=cs.filter(c=>!isWDc(c)).map(c=>parScore(c.score)).filter(v=>v!=null).sort((a,b)=>a-b);
+    if(pars.length>espnCut.count)projCutScore=pars[espnCut.count-1];
+  }
 
   // ── Parse each player ──────────────────────────────────────────────────────
   const parsed=cs.map(c=>{
@@ -366,7 +379,7 @@ function parseESPN(data){
     const isCutByLine=cutLineActive&&!isWD&&myPar!=null&&myPar>espnCut.score;
     const isCut=isCutByR3||isCutByR4||isCutExplicit||isCutByLine;
     // Projected to miss the floating cut (not an official CUT — score stays, still alive).
-    const projMissed=projCutActive&&!isCut&&!isWD&&myPar!=null&&myPar>espnCut.score;
+    const projMissed=projCutActive&&projCutScore!=null&&!isCut&&!isWD&&myPar!=null&&myPar>projCutScore;
 
     // ── Total score: sum rounds that have real data ───────────────────────
     const calcTotal=(()=>{
