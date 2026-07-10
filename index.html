@@ -66,6 +66,9 @@
     .cdiv{display:flex;align-items:center;gap:10px;padding:18px 0 10px}
     .cline{flex:1;height:1px;background:rgba(139,58,58,.3)}
     .clbl{font-size:9.5px;font-weight:700;letter-spacing:2px;color:#8B3A3A;font-family:'JetBrains Mono',monospace}
+    .cdiv.pcut .cline{background:rgba(201,166,100,.4)}
+    .cdiv.pcut .clbl{color:#C9A664}
+    .pcut-tag{color:#C9A664!important}
     .ggrid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
     .gcard{background:#FFFCF5;border:1px solid rgba(27,58,46,.08);border-left:4px solid;border-radius:6px;padding:10px 11px;text-align:left;cursor:pointer;width:100%}
     .gcard:active{transform:scale(.98)}
@@ -259,7 +262,7 @@ function resolveField(players){
 const S={
   team:(()=>{try{return localStorage.getItem('bz-team')||'brady'}catch{return'brady'}})(),
   view:'board',players:[],status:'',updated:'',refreshing:false,error:null,group:null,stSearch:'',poolData:null,seen:ALL_POOL,comboSel:[],comboSearch:'',poolOpen:null,
-  tournamentName:'Byron Nelson',venueName:'TPC Craig Ranch',round:1,isFinal:false,moneyComplete:false,officialFinal:false,isPreTournament:false,startDate:'',nifExpanded:false
+  tournamentName:'Byron Nelson',venueName:'TPC Craig Ranch',round:1,isFinal:false,moneyComplete:false,officialFinal:false,isPreTournament:false,projCutScore:null,startDate:'',nifExpanded:false
 };
 try{
   const ck=localStorage.getItem('bz-current-key');
@@ -327,6 +330,14 @@ function parseESPN(data){
   const cutLineActive=!isR3Plus && !!espnCut && espnCut.score!=null && espnCut.round!=null
     && espnCut.currentRound!=null && espnCut.currentRound>espnCut.round
     && espnCut.count!=null && espnCut.count>0 && espnCut.count<cs.length;
+  // Floating / projected cut line: the SAME ESPN cut line, shown LIVE during a cut
+  // round without the official gate (this is how the PGA/ESPN apps show it). Players
+  // worse than it are "projected to miss" — we do NOT wipe their score or call them
+  // CUT (they can still climb back); we just draw the line and zero their PROJECTED
+  // pay, since they aren't currently in the money.
+  const projCutActive=!isR3Plus && !!espnCut && espnCut.score!=null && espnCut.round!=null
+    && espnCut.count!=null && espnCut.count>0 && espnCut.count<cs.length;
+  const projCutScore=projCutActive?espnCut.score:null;
   const parScore=v=>{const s=String(v==null?'':v).toUpperCase().trim();
     if(s==='E')return 0;if(!s||s==='CUT'||s==='MC'||s==='WD'||s==='DQ')return null;
     const n=parseInt(s.replace('+',''),10);return isNaN(n)?null:n;};
@@ -354,6 +365,8 @@ function parseESPN(data){
     const myPar=parScore(c.score);
     const isCutByLine=cutLineActive&&!isWD&&myPar!=null&&myPar>espnCut.score;
     const isCut=isCutByR3||isCutByR4||isCutExplicit||isCutByLine;
+    // Projected to miss the floating cut (not an official CUT — score stays, still alive).
+    const projMissed=projCutActive&&!isCut&&!isWD&&myPar!=null&&myPar>espnCut.score;
 
     // ── Total score: sum rounds that have real data ───────────────────────
     const calcTotal=(()=>{
@@ -378,7 +391,7 @@ function parseESPN(data){
     const thru=(!isCut&&activeHoles>0)?(activeHoles>=18?'F':`H${activeHoles}`):'';
 
     const earnings=(typeof c.earnings==='number')?c.earnings:null;
-    return{name,total,order,isCut,isWD,today,thru,earnings};
+    return{name,total,order,isCut,isWD,today,thru,earnings,projMissed};
   });
 
   // ── Rank players ──────────────────────────────────────────────────────────
@@ -431,7 +444,7 @@ function parseESPN(data){
   });
   const isPreTournament=!anyNonZeroScore;
 
-  return{players:[...made,...cut],round,isFinal,isPreTournament};
+  return{players:[...made,...cut],round,isFinal,isPreTournament,projCutScore};
 }
 
 
@@ -443,7 +456,7 @@ async function fetchData(){
     if(!r.ok)throw new Error('HTTP '+r.status);
     const j=await r.json();const parsed=parseESPN(j);
     if(!parsed||!parsed.players.length)throw new Error('No data');
-    S.players=parsed.players;S.round=parsed.round;S.isFinal=parsed.isFinal||false;S.isPreTournament=parsed.isPreTournament||false;S.error=null;
+    S.players=parsed.players;S.round=parsed.round;S.isFinal=parsed.isFinal||false;S.isPreTournament=parsed.isPreTournament||false;S.projCutScore=(parsed.projCutScore!=null?parsed.projCutScore:null);S.error=null;
     // Auto-resolve spelling/nickname variants to pool picks BEFORE any scoring or
     // rendering (sets DYN_ALIAS). Only truly ambiguous names are returned, and those
     // are console-logged, not bannered.
@@ -528,14 +541,14 @@ function gRow(p,selK){
   </div>
 </div>`}
 
-function pRow(p,selK){
-  const isCut=p.pos==='CUT',g=getG(p.name),owned=ownedBy(p.name,selK),tc=TEAMS[selK].color,n=tv(p.total);
+function pRow(p,selK,tag){
+  const isCut=p.pos==='CUT',pm=!!p.projMissed,g=getG(p.name),owned=ownedBy(p.name,selK),tc=TEAMS[selK].color,n=tv(p.total);
   const sc=isCut?'cutsc':(n<0?'under':'');
   return`<div class="row${owned?' owned':''}${isCut?' cutrow':''}">
   <div class="pos">${isCut?icoScissors:esc(p.pos)}</div>
   <div class="nc">
     <div class="nr">${owned?`<span style="color:${tc};display:inline-flex">${icoStar(tc)}</span>`:''}<span class="pname${isCut?' gc':''}">${esc(p.name)}</span></div>
-    <div class="mr">${gbadge(g)}${chips(p.name,selK)}${!isCut&&p.today?`<span class="td-txt">today ${esc(p.today)}</span>`:''}${!isCut&&p.thru?`<span class="th-txt">${esc(p.thru)}</span>`:''}</div>
+    <div class="mr">${gbadge(g)}${chips(p.name,selK)}${(tag&&pm)?`<span class="th-txt pcut-tag">proj cut</span>`:''}${!isCut&&p.today?`<span class="td-txt">today ${esc(p.today)}</span>`:''}${!isCut&&p.thru?`<span class="th-txt">${esc(p.thru)}</span>`:''}</div>
   </div>
   <div class="sc"><span class="${sc}">${esc(p.total)}</span></div>
 </div>`}
@@ -543,7 +556,13 @@ function pRow(p,selK){
 // ── views ─────────────────────────────────────────────────────────────────────
 function boardHTML(){
   const made=S.players.filter(p=>p.pos!=='CUT'&&p.pos!=='WD'),cut=S.players.filter(p=>p.pos==='CUT');
-  let h=made.map(p=>pRow(p,S.team)).join('');
+  const s=S.projCutScore,plbl=(s==null?'':(s===0?'E':s>0?'+'+s:''+s));
+  let h='',drawn=false;
+  made.forEach(p=>{
+    // Floating projected cut line: drawn once, right where the projected cut sits.
+    if(!drawn&&p.projMissed){h+=`<div class="cdiv pcut"><span class="cline"></span><span class="clbl">PROJECTED CUT${plbl?' '+plbl:''}</span><span class="cline"></span></div>`;drawn=true;}
+    h+=pRow(p,S.team);
+  });
   if(cut.length)h+=`<div class="cdiv"><span class="cline"></span><span class="clbl">MISSED CUT</span><span class="cline"></span></div>`+cut.map(p=>pRow(p,S.team)).join('');
   return h;
 }
@@ -560,7 +579,7 @@ function teamHTML(){
   const missingRows=rows.filter(p=>p.missing);
   let h=colHdr+activeRows.map(p=>{
     if(isLateRound&&seenSet.has(can(p.name))&&p.pos==='CUT')return`<div class="row cutrow"><div class="pos">${icoScissors}</div><div class="nc"><div class="nr"><span style="color:${t.color};display:inline-flex">${icoStar(t.color)}</span><span class="pname gc">${esc(p.name)}</span></div><div class="mr">${gbadge(p._g)}<span class="td-txt">missed cut</span></div></div><div class="sc cutsc">CUT</div></div>`;
-    return pRow(p,S.team);
+    return pRow(p,S.team,true);
   }).join('');
   if(missingRows.length){
     if(S.nifExpanded){
@@ -728,6 +747,8 @@ function payForPlayer(p,tieMap){
   if(!p)return 0;
   if(p.pos==='CUT'||p.pos==='WD')return 0;
   if(S.moneyComplete&&typeof p.earnings==='number')return p.earnings;
+  // Below the floating projected cut line -> projected to miss -> not in the money.
+  if(p.projMissed)return 0;
   return projPay(p.pos,tieMap);
 }
 
