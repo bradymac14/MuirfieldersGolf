@@ -310,22 +310,22 @@ function parseESPN(data){
   const isR4=r4;
   const isR3Plus=r3||r4;
 
-  // ── ESPN live cut line ──────────────────────────────────────────────────────
-  // ESPN publishes the real cut line (cutScore) + count (cutCount) per event in
-  // the tournament object (relayed by api/scores.js as ev.cut). ESPN knows each
-  // event's rule and updates it in real time, so we trust it rather than guess.
-  // This lets us drop missed-cut players to $0 the moment the math is clear —
-  // before ESPN posts Saturday tee times. Guarded so no-cut events never trip it:
-  // require we've reached the cut round and that a real cut exists (0<count<field).
-  // CRITICAL: only use the cutScore line to fill the gap BEFORE round-3 scoring
-  // starts. cutScore is the 36-hole line; once R3 is underway a player's total
-  // includes R3 progress, so a made-cut player playing a bad Saturday (e.g. +5
-  // after R2 -> +12 in R3) would falsely exceed it. Once isR3Plus, the tee-time/
-  // round-3-data logic (isCutByR3) governs — it keys off absence from the R3
-  // field, which stays correct no matter how made-cut players score.
+  // ── ESPN cut line (OFFICIAL cut only) ────────────────────────────────────────
+  // ESPN publishes the cut line (cutScore) + count (cutCount) per event in the
+  // tournament object (relayed by api/scores.js as ev.cut). We use it to drop
+  // missed-cut players to $0 — but ONLY once the cut is OFFICIAL, never while it's
+  // still a live projection. During Round 2, players are still finishing and a golfer
+  // on the wrong side of the projected line can easily climb back, so showing anyone
+  // as "cut" mid-round is premature and wrong. The gate for "official" is
+  // currentRound > cutRound: the cut round is fully complete and the field is set.
+  // (Guarded so no-cut events never trip it: a real cut must exist, 0<count<field.)
+  // We also keep !isR3Plus: once R3 scoring starts the 36-hole cutScore no longer
+  // matches a player's running total, so the tee-time/round-3-data logic
+  // (isCutByR3) governs instead — it keys off absence from the R3 field. This gate
+  // covers the narrow window where the cut is official but R3 hasn't teed off yet.
   const espnCut=data?.events?.[0]?.cut||null;
   const cutLineActive=!isR3Plus && !!espnCut && espnCut.score!=null && espnCut.round!=null
-    && (espnCut.currentRound==null||espnCut.currentRound>=espnCut.round)
+    && espnCut.currentRound!=null && espnCut.currentRound>espnCut.round
     && espnCut.count!=null && espnCut.count>0 && espnCut.count<cs.length;
   const parScore=v=>{const s=String(v==null?'':v).toUpperCase().trim();
     if(s==='E')return 0;if(!s||s==='CUT'||s==='MC'||s==='WD'||s==='DQ')return null;
