@@ -296,8 +296,8 @@ function overrideWinner(tname){
 }
 
 // ── ESPN parse ────────────────────────────────────────────────────────────────
-function parseESPN(data){
-  const comp=data?.events?.[0]?.competitions?.[0];if(!comp)return null;
+function parseEvent(ev){
+  const comp=ev?.competitions?.[0];if(!comp)return null;
   const cs=comp.competitors||[];
   if(!cs.length)return null;
 
@@ -326,7 +326,7 @@ function parseESPN(data){
   // matches a player's running total, so the tee-time/round-3-data logic
   // (isCutByR3) governs instead — it keys off absence from the R3 field. This gate
   // covers the narrow window where the cut is official but R3 hasn't teed off yet.
-  const espnCut=data?.events?.[0]?.cut||null;
+  const espnCut=ev?.cut||null;
   const cutLineActive=!isR3Plus && !!espnCut && espnCut.score!=null && espnCut.round!=null
     && espnCut.currentRound!=null && espnCut.currentRound>espnCut.round
     && espnCut.count!=null && espnCut.count>0 && espnCut.count<cs.length;
@@ -418,7 +418,7 @@ function parseESPN(data){
   // 1st and the other tied leader(s) drop to a tie at 2nd — otherwise projPay()
   // would split 1st+2nd money evenly across the playoff pair (e.g. the 2026
   // Memorial paid Poston $4.0M / Gerard $2.2M, not $3.1M each).
-  const evt0=data?.events?.[0];
+  const evt0=ev;
   const evtFinal=(evt0?.status?.type?.completed===true)||
     (evt0?.status?.type?.name||'').toLowerCase().includes('final');
   // ESPN's published champion wins; a manual override fills the gap while ESPN lags
@@ -446,9 +446,9 @@ function parseESPN(data){
   cut.forEach(p=>p.pos='CUT');
 
   // ── Final states ──────────────────────────────────────────────────────────
-  const isFinal=(data?.events?.[0]?.status?.type?.completed===true)||
-    (data?.events?.[0]?.status?.type?.name||'').toLowerCase().includes('final')||
-    (data?.events?.[0]?.status?.type?.shortDetail||'').toLowerCase().includes('final');
+  const isFinal=(ev?.status?.type?.completed===true)||
+    (ev?.status?.type?.name||'').toLowerCase().includes('final')||
+    (ev?.status?.type?.shortDetail||'').toLowerCase().includes('final');
 
   // Pre-tournament: no player has any non-zero score
   const anyNonZeroScore=cs.some(c=>{
@@ -467,20 +467,35 @@ async function fetchData(){
   try{
     const r=await fetch('/api/scores',{cache:'no-store'});
     if(!r.ok)throw new Error('HTTP '+r.status);
-    const j=await r.json();const parsed=parseESPN(j);
+    const j=await r.json();
+    // Parse EVERY concurrent PGA event this week. The marquee event (events[0], the
+    // bigger purse — set by api/scores.js) drives the board + all tournament meta; the
+    // other events (e.g. ISCO alongside the Genesis Scottish Open) contribute only
+    // their POOL players so their money counts, since the pool scores both. A golfer
+    // plays just one event a week, so the pool field is a clean union.
+    const evs=Array.isArray(j?.events)?j.events:[];
+    const parsedList=evs.map(ev=>parseEvent(ev)).filter(Boolean);
+    const parsed=parsedList[0];
     if(!parsed||!parsed.players.length)throw new Error('No data');
-    S.players=parsed.players;S.round=parsed.round;S.isFinal=parsed.isFinal||false;S.isPreTournament=parsed.isPreTournament||false;S.projCutScore=(parsed.projCutScore!=null?parsed.projCutScore:null);S.error=null;
-    // Auto-resolve spelling/nickname variants to pool picks BEFORE any scoring or
-    // rendering (sets DYN_ALIAS). Only truly ambiguous names are returned, and those
-    // are console-logged, not bannered.
-    try{window._app.coverage=resolveField(parsed.players);}catch{}
+    // Resolve nickname/initial variants across the WHOLE week's field (sets DYN_ALIAS)
+    // before any scoring or rendering; only truly ambiguous names are returned (logged,
+    // not bannered).
+    const combined=[];
+    parsedList.forEach((px,ei)=>px.players.forEach(p=>combined.push(ei===0?p:{...p,_off:true})));
+    try{window._app.coverage=resolveField(combined);}catch{}
+    // Pool field = marquee's full board + only the POOL players from the other events.
+    const players=parsed.players.slice();
+    for(let e=1;e<parsedList.length;e++)
+      parsedList[e].players.forEach(p=>{if(ALL_POOL.includes(matchToPool(p.name)))players.push({...p,_off:true});});
+    const allFinal=parsedList.every(px=>px.isFinal);
+    S.players=players;S.round=parsed.round;S.isFinal=(parsedList.length>1?allFinal:(parsed.isFinal||false));S.isPreTournament=parsed.isPreTournament||false;S.projCutScore=(parsed.projCutScore!=null?parsed.projCutScore:null);S.error=null;
     S.updated=new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
     S.status=j?.events?.[0]?.status?.type?.detail||'';
     // Save all player names ESPN ever returned (to distinguish cut vs not in field)
     try{
       const prevKey=localStorage.getItem('bz-current-key')||'bz-cache-bn26';const prev=JSON.parse(localStorage.getItem(prevKey)||'{}');
       const prevSeen=prev.seen||[];
-      const nowSeen=parsed.players.map(p=>matchToPool(p.name));
+      const nowSeen=S.players.map(p=>matchToPool(p.name));
       const allSeen=[...new Set([...prevSeen,...nowSeen])];
       S.seen=allSeen;
       const newTname=j?.events?.[0]?.shortName||j?.events?.[0]?.name||S.tournamentName;
@@ -501,12 +516,16 @@ async function fetchData(){
       // and the payouts reconcile to the purse. Until then it's "Finalizing…".
       // moneyComplete also drives payForPlayer so payouts are all-or-nothing — all
       // real ESPN money, or all projected curve, never a mix of the two.
+      // moneyComplete needs EVERY made pool golfer to have money — across all events
+      // (an other-event golfer who missed the ISCO cut is pos==='CUT', so excluded).
       const madeP=S.players.filter(p=>p.pos&&p.pos!=='CUT'&&p.pos!=='WD');
       S.moneyComplete=S.isFinal&&madeP.length>0&&madeP.every(p=>typeof p.earnings==='number');
       let reconciledOK=true;
       if((S.curve==='std'||S.curve==='sig')&&S.purse>0){
-        const tmR={};S.players.forEach(p=>{if(p.pos&&p.pos!=='CUT'&&p.pos!=='WD')tmR[p.pos]=(tmR[p.pos]||0)+1});
-        let totR=0;S.players.forEach(p=>{totR+=payForPlayer(p,tmR)});
+        // Reconcile only the MARQUEE field to the marquee purse — other-event players
+        // (ISCO) carry their own purse and would blow past this total.
+        const tmR={};S.players.forEach(p=>{if(!p._off&&p.pos&&p.pos!=='CUT'&&p.pos!=='WD')tmR[p.pos]=(tmR[p.pos]||0)+1});
+        let totR=0;S.players.forEach(p=>{if(!p._off)totR+=payForPlayer(p,tmR)});
         reconciledOK=Math.abs(totR-S.purse)/S.purse<=0.03;
       }
       S.officialFinal=S.isFinal&&S.moneyComplete&&reconciledOK;
@@ -568,7 +587,7 @@ function pRow(p,selK,tag){
 
 // ── views ─────────────────────────────────────────────────────────────────────
 function boardHTML(){
-  const made=S.players.filter(p=>p.pos!=='CUT'&&p.pos!=='WD'),cut=S.players.filter(p=>p.pos==='CUT');
+  const made=S.players.filter(p=>!p._off&&p.pos!=='CUT'&&p.pos!=='WD'),cut=S.players.filter(p=>!p._off&&p.pos==='CUT');
   const s=S.projCutScore,plbl=(s==null?'':(s===0?'E':s>0?'+'+s:''+s));
   let h='',drawn=false;
   made.forEach(p=>{
@@ -759,6 +778,10 @@ function projPay(pos,tieMap){
 function payForPlayer(p,tieMap){
   if(!p)return 0;
   if(p.pos==='CUT'||p.pos==='WD')return 0;
+  // Player from a concurrent non-marquee event (e.g. ISCO alongside the Scottish
+  // Open): score their REAL money once it's posted; never run them through the
+  // marquee event's curve (different purse). Live, before money posts, they read $0.
+  if(p._off)return (typeof p.earnings==='number')?p.earnings:0;
   if(S.moneyComplete&&typeof p.earnings==='number')return p.earnings;
   // Below the floating projected cut line -> projected to miss -> not in the money.
   if(p.projMissed)return 0;
@@ -818,7 +841,7 @@ function poolRoster(name,pm,byC){
 function poolHTML(){
   // Build tie map: pos→count of alive players at that position
   const tieMap={};
-  S.players.forEach(p=>{if(p.pos&&p.pos!=='CUT'&&p.pos!=='WD')tieMap[p.pos]=(tieMap[p.pos]||0)+1});
+  S.players.forEach(p=>{if(!p._off&&p.pos&&p.pos!=='CUT'&&p.pos!=='WD')tieMap[p.pos]=(tieMap[p.pos]||0)+1});
 
   // Build pay map by player canonical name
   const pm={};
@@ -865,7 +888,7 @@ function poolHTML(){
 function getPoolRank(teamKey){
   if(S.isPreTournament)return'—';
   const tieMap={};
-  S.players.forEach(p=>{if(p.pos&&p.pos!=='CUT'&&p.pos!=='WD')tieMap[p.pos]=(tieMap[p.pos]||0)+1});
+  S.players.forEach(p=>{if(!p._off&&p.pos&&p.pos!=='CUT'&&p.pos!=='WD')tieMap[p.pos]=(tieMap[p.pos]||0)+1});
   const pm={};
   S.players.forEach(p=>{pm[matchToPool(p.name)]=payForPlayer(p,tieMap)});
   const scored=PT.map(([name,picks])=>({
@@ -882,7 +905,7 @@ function getPoolRank(teamKey){
 // Shared: payout map + ranked team list (used by Combos; mirrors poolHTML's math)
 function rankedTeams(){
   const tieMap={};
-  S.players.forEach(p=>{if(p.pos&&p.pos!=='CUT'&&p.pos!=='WD')tieMap[p.pos]=(tieMap[p.pos]||0)+1});
+  S.players.forEach(p=>{if(!p._off&&p.pos&&p.pos!=='CUT'&&p.pos!=='WD')tieMap[p.pos]=(tieMap[p.pos]||0)+1});
   const pm={};
   S.players.forEach(p=>{pm[matchToPool(p.name)]=payForPlayer(p,tieMap)});
   const scored=PT.map(([name,picks])=>({name,picks,earn:S.isPreTournament?0:picks.reduce((t,i)=>t+(pm[matchToPool(PL[i])]||0),0),fc:FM[name]||null}));
@@ -938,7 +961,7 @@ function summaryHTML(){
   const alive=picks.filter(p=>!p.missing&&p.pos!=='CUT'&&p.pos!=='WD').sort((a,b)=>pv(a.pos)-pv(b.pos));
   const cut=picks.filter(p=>!p.missing&&p.pos==='CUT');
   const best=alive[0];
-  const _tm={};S.players.forEach(p=>{if(p.pos&&p.pos!=='CUT'&&p.pos!=='WD')_tm[p.pos]=(_tm[p.pos]||0)+1});
+  const _tm={};S.players.forEach(p=>{if(!p._off&&p.pos&&p.pos!=='CUT'&&p.pos!=='WD')_tm[p.pos]=(_tm[p.pos]||0)+1});
   const _pm={};S.players.forEach(p=>{_pm[matchToPool(p.name)]=payForPlayer(p,_tm)});
   const _earn=S.isPreTournament?0:t.picks.reduce((tot,p)=>tot+(_pm[matchToPool(p)]||0),0);
   const projStr=_earn>0?'$'+Math.round(_earn).toLocaleString('en-US'):'—';

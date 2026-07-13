@@ -87,27 +87,29 @@ export default async function handler(req, res) {
       data.events = events;
     }
 
-    // Official prize money per player on the featured event (events[0]). Once it's
-    // FINAL, ESPN's core API exposes each competitor's exact official money
-    // (statistics → "amount"), which already bakes in ties and amateur forfeits to
-    // the dollar. We attach it as competitor.earnings so the client uses REAL money
-    // instead of an approximate curve — accurate for any tournament, no per-event
-    // upkeep. Only runs when final (no official money exists mid-event); best-effort
-    // and time-bounded so it can never delay or break the live scores response.
+    // Official prize money per player, for EVERY final event this week (not just the
+    // marquee) — the pool sums both when two run at once (Scottish + ISCO). Once an
+    // event is FINAL, ESPN's core API exposes each competitor's exact official money
+    // (statistics → "amount"), which already bakes in ties and amateur forfeits to the
+    // dollar. We attach it as competitor.earnings so the client uses REAL money instead
+    // of an approximate curve. Best-effort and time-bounded (one shared budget across
+    // events) so it can never delay or break the live scores response; if it bails, the
+    // next request finishes it via stale-while-revalidate.
     let moneyComplete = false;
     try {
-      const ev = data?.events?.[0];
-      const eid = ev?.id;
-      const comp = ev?.competitions?.[0];
-      const st = comp?.status?.type;
-      const isFinal = st?.completed === true || /final/i.test(st?.name || '');
-      const cs = comp?.competitors || [];
-      if (eid && isFinal && cs.length) {
+      const deadline = Date.now() + 7500;
+      const CONC = 30;
+      let anyFinal = false, attached = 0, bailed = false;
+      for (const ev of events) {
+        const eid = ev?.id;
+        const comp = ev?.competitions?.[0];
+        const st = comp?.status?.type;
+        const isFinal = st?.completed === true || /final/i.test(st?.name || '');
+        const cs = comp?.competitors || [];
+        if (!eid || !isFinal || !cs.length) continue;
+        anyFinal = true;
         const base = 'https://sports.core.api.espn.com/v2/sports/golf/leagues/pga/events/'
           + eid + '/competitions/' + eid + '/competitors';
-        const deadline = Date.now() + 7000;
-        let attached = 0, bailed = false;
-        const CONC = 24;
         for (let i = 0; i < cs.length; i += CONC) {
           if (Date.now() > deadline) { bailed = true; break; }
           await Promise.all(cs.slice(i, i + CONC).map(async (c) => {
@@ -123,8 +125,9 @@ export default async function handler(req, res) {
             } catch (_) { /* per-player best-effort */ }
           }));
         }
-        moneyComplete = !bailed && attached > 0;
+        if (bailed) break;
       }
+      moneyComplete = anyFinal && !bailed && attached > 0;
     } catch (_) { /* money enrichment is optional */ }
 
     res.setHeader('Access-Control-Allow-Origin', '*');
