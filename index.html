@@ -468,12 +468,32 @@ async function fetchData(){
     const r=await fetch('/api/scores',{cache:'no-store'});
     if(!r.ok)throw new Error('HTTP '+r.status);
     const j=await r.json();
-    // Parse EVERY concurrent PGA event this week. The marquee event (events[0], the
-    // bigger purse — set by api/scores.js) drives the board + all tournament meta; the
-    // other events (e.g. ISCO alongside the Genesis Scottish Open) contribute only
-    // their POOL players so their money counts, since the pool scores both. A golfer
-    // plays just one event a week, so the pool field is a clean union.
-    const evs=Array.isArray(j?.events)?j.events:[];
+    // Combine the week's CONCURRENT PGA events (e.g. the Genesis Scottish Open + ISCO):
+    // the primary event drives the board + all meta, and the other concurrent events
+    // contribute only their POOL players so their money counts (a golfer plays one event
+    // a week, so it's a clean union). Two guards keep unrelated events out:
+    //  • primary = a LIVE event if any (purse enrichment can fail and must not let an
+    //    opposite-field event outrank the real one), else the server's purse-max.
+    //  • only blend events in the SAME tournament week as primary (start within 4 days),
+    //    so a different week's event in the scoreboard (e.g. an upcoming Corales
+    //    Puntacana) never bleeds its players in.
+    const evsAll=Array.isArray(j?.events)?j.events:[];
+    const stateOf=ev=>ev?.competitions?.[0]?.status?.type?.state||ev?.status?.type?.state||'';
+    const startOf=ev=>{const d=ev?.date||ev?.competitions?.[0]?.date||ev?.startDate;const t=d?Date.parse(d):NaN;return isNaN(t)?null:t;};
+    // Purse decides the marquee; if ESPN's purse hasn't loaded, fall back to our
+    // scheduled purse by name so a major never loses the board to an opposite-field event.
+    const purseOf=ev=>{const p=Number(ev?.purse)||0;return p>0?p:(getTournamentInfo(ev?.shortName||ev?.name||'').purse||0);};
+    const liveEvs=evsAll.filter(ev=>stateOf(ev)==='in');
+    const primaryEv=(liveEvs.length?liveEvs:evsAll).slice().sort((a,b)=>purseOf(b)-purseOf(a))[0];
+    const pStart=primaryEv?startOf(primaryEv):null;
+    const anyDates=evsAll.some(ev=>startOf(ev)!=null);
+    const evs=evsAll.filter(ev=>{
+      if(ev===primaryEv)return true;
+      if(!anyDates)return true;                       // no date info -> keep genuine multi-event weeks
+      const s=startOf(ev);
+      return s!=null&&pStart!=null&&Math.abs(s-pStart)<=4*864e5;   // same tournament week
+    });
+    evs.sort((a,b)=>a===primaryEv?-1:b===primaryEv?1:0);           // primary drives the board
     const parsedList=evs.map(ev=>parseEvent(ev)).filter(Boolean);
     const parsed=parsedList[0];
     if(!parsed||!parsed.players.length)throw new Error('No data');
@@ -490,7 +510,7 @@ async function fetchData(){
     const allFinal=parsedList.every(px=>px.isFinal);
     S.players=players;S.round=parsed.round;S.isFinal=(parsedList.length>1?allFinal:(parsed.isFinal||false));S.isPreTournament=parsed.isPreTournament||false;S.projCutScore=(parsed.projCutScore!=null?parsed.projCutScore:null);S.error=null;
     S.updated=new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
-    S.status=j?.events?.[0]?.status?.type?.detail||'';
+    S.status=primaryEv?.status?.type?.detail||primaryEv?.competitions?.[0]?.status?.type?.detail||'';
     // Save all player names ESPN ever returned (to distinguish cut vs not in field)
     try{
       const prevKey=localStorage.getItem('bz-current-key')||'bz-cache-bn26';const prev=JSON.parse(localStorage.getItem(prevKey)||'{}');
@@ -498,13 +518,13 @@ async function fetchData(){
       const nowSeen=S.players.map(p=>matchToPool(p.name));
       const allSeen=[...new Set([...prevSeen,...nowSeen])];
       S.seen=allSeen;
-      const newTname=j?.events?.[0]?.shortName||j?.events?.[0]?.name||S.tournamentName;
+      const newTname=primaryEv?.shortName||primaryEv?.name||S.tournamentName;
       if(newTname!==S.tournamentName)S.tournamentName=newTname;
       // Purse comes LIVE from ESPN (exact, current); the curve shape comes from
       // our verified tables. Fall back to the scheduled estimate only if ESPN
       // hasn't published the purse yet. Recomputed every refresh.
       const ti2=getTournamentInfo(S.tournamentName);
-      const espnPurse=Number(j?.events?.[0]?.purse)||0;
+      const espnPurse=Number(primaryEv?.purse)||0;
       const usePurse=espnPurse>0?espnPurse:ti2.purse;
       S.purse=usePurse;S.purseLive=espnPurse>0;S.curve=ti2.curve;
       PO=calcPO(usePurse,ti2.curve);MC_PAY=ti2.mcPay;
@@ -530,7 +550,7 @@ async function fetchData(){
       }
       S.officialFinal=S.isFinal&&S.moneyComplete&&reconciledOK;
       try{S.health=healthCheck();window._app.health=S.health;}catch(_){S.health=[];}
-      const espnVenue=j?.events?.[0]?.competitions?.[0]?.venue?.fullName||'';
+      const espnVenue=primaryEv?.competitions?.[0]?.venue?.fullName||'';
       S.venueName=espnVenue||ti2.venue||S.venueName;
       const ck2='bz-'+can(S.tournamentName).replace(/ /g,'').slice(0,18);
       localStorage.setItem('bz-current-key',ck2);
