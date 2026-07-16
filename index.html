@@ -69,6 +69,9 @@
     .cdiv.pcut .cline{background:rgba(201,166,100,.4)}
     .cdiv.pcut .clbl{color:#C9A664}
     .pcut-tag{color:#C9A664!important}
+    .cdiv.evdiv{padding:14px 0 9px}
+    .cdiv.evdiv .cline{background:rgba(60,96,148,.32)}
+    .cdiv.evdiv .clbl{color:#3A6094}
     .ev-tag{display:inline-flex;align-items:center;background:rgba(60,96,148,.15);border:1px solid rgba(60,96,148,.4);border-radius:3px;padding:0 4px;font-size:8px;font-weight:700;letter-spacing:.5px;color:#3A6094;font-family:'JetBrains Mono',monospace;white-space:nowrap}
     .ggrid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
     .gcard{background:#FFFCF5;border:1px solid rgba(27,58,46,.08);border-left:4px solid;border-radius:6px;padding:10px 11px;text-align:left;cursor:pointer;width:100%}
@@ -608,14 +611,14 @@ function gRow(p,selK){
   </div>
 </div>`}
 
-function pRow(p,selK,tag){
+function pRow(p,selK,tag,hideEv){
   const isCut=p.pos==='CUT',pm=!!p.projMissed,g=getG(p.name),owned=ownedBy(p.name,selK),tc=TEAMS[selK].color,n=tv(p.total);
   const sc=isCut?'cutsc':(n<0?'under':'');
   return`<div class="row${owned?' owned':''}${isCut?' cutrow':''}">
   <div class="pos">${isCut?icoScissors:esc(p.pos)}</div>
   <div class="nc">
     <div class="nr">${owned?`<span style="color:${tc};display:inline-flex">${icoStar(tc)}</span>`:''}<span class="pname${isCut?' gc':''}">${esc(p.name)}</span></div>
-    <div class="mr">${gbadge(g)}${p._off&&p._evLabel?`<span class="ev-tag">${esc(p._evLabel)}</span>`:''}${chips(p.name,selK)}${(tag&&pm)?`<span class="th-txt pcut-tag">proj cut</span>`:''}${!isCut&&p.today?`<span class="td-txt">today ${esc(p.today)}</span>`:''}${!isCut&&p.thru?`<span class="th-txt">${esc(p.thru)}</span>`:''}</div>
+    <div class="mr">${gbadge(g)}${p._off&&p._evLabel&&!hideEv?`<span class="ev-tag">${esc(p._evLabel)}</span>`:''}${chips(p.name,selK)}${(tag&&pm)?`<span class="th-txt pcut-tag">proj cut</span>`:''}${!isCut&&p.today?`<span class="td-txt">today ${esc(p.today)}</span>`:''}${!isCut&&p.thru?`<span class="th-txt">${esc(p.thru)}</span>`:''}</div>
   </div>
   <div class="sc"><span class="${sc}">${esc(p.total)}</span></div>
 </div>`}
@@ -644,10 +647,20 @@ function teamHTML(){
   const colHdr=`<div class="col-hdr"><div></div><div class="col-hdr-lbl">PLAYER</div><div class="col-hdr-lbl" style="text-align:right">SCORE</div></div>`;
   const activeRows=rows.filter(p=>!p.missing);
   const missingRows=rows.filter(p=>p.missing);
-  let h=colHdr+activeRows.map(p=>{
+  const renderRow=p=>{
     if(isLateRound&&seenSet.has(can(p.name))&&p.pos==='CUT')return`<div class="row cutrow"><div class="pos">${icoScissors}</div><div class="nc"><div class="nr"><span style="color:${t.color};display:inline-flex">${icoStar(t.color)}</span><span class="pname gc">${esc(p.name)}</span></div><div class="mr">${gbadge(p._g)}<span class="td-txt">missed cut</span></div></div><div class="sc cutsc">CUT</div></div>`;
-    return pRow(p,S.team,true);
-  }).join('');
+    return pRow(p,S.team,true,true);   // hide inline event tag — the divider labels it
+  };
+  // Group by tournament: marquee picks first, then each concurrent event under its own
+  // labelled divider, so an Open T3 and a Barracuda T3 are never listed side by side.
+  const marqRows=activeRows.filter(p=>!p._off);
+  const offRows=activeRows.filter(p=>p._off);
+  const byEv={},evOrder=[];
+  offRows.forEach(p=>{const l=p._evLabel||'OTHER EVENT';if(!byEv[l]){byEv[l]=[];evOrder.push(l);}byEv[l].push(p);});
+  let h=colHdr+marqRows.map(renderRow).join('');
+  evOrder.forEach(l=>{
+    h+=`<div class="cdiv evdiv"><span class="cline"></span><span class="clbl">${esc(l)}</span><span class="cline"></span></div>`+byEv[l].map(renderRow).join('');
+  });
   if(missingRows.length){
     if(S.nifExpanded){
       h+=missingRows.map(p=>`<div class="row missing"><div class="pos">—</div><div class="nc"><div class="nr"><span style="color:${t.color};display:inline-flex;opacity:.5">${icoStar(t.color)}</span><span class="pname">${esc(p.name)}</span></div><div class="mr">${gbadge(p._g)}<span class="th-txt">not in field</span></div></div><div class="sc">—</div></div>`).join('');
@@ -862,16 +875,23 @@ function poolRoster(name,pm,byC){
     const pn=PL[idx],mk=matchToPool(pn),live=byC[mk];
     return{name:pn,g:getG(pn),pos:live?live.pos:null,total:live?live.total:'—',thru:live?live.thru:'',missing:!live,earn:pm[mk]||0,evLabel:live&&live._off?live._evLabel:''};
   });
-  rows.sort((a,b)=>{
-    const rk=p=>p.missing?2:(p.pos==='CUT'||p.pos==='WD')?1:0;
-    const d=rk(a)-rk(b);return d!==0?d:pv(a.pos)-pv(b.pos);
-  });
-  return`<div class="pool-roster">`+rows.map(p=>{
+  const bypos=(a,b)=>pv(a.pos)-pv(b.pos);
+  const rowHTML=p=>{
     const isCut=p.pos==='CUT',n=tv(p.total),sc=isCut?'cutsc':(n<0?'under':'');
     const posCell=p.missing?'—':isCut?icoScissors:esc(p.pos);
     const right=p.missing?`<span class="th-txt">not in field</span>`:`<span class="${sc}">${esc(p.total)}</span>`;
-    return`<div class="row${isCut?' cutrow':''}${p.missing?' missing':''}"><div class="pos">${posCell}</div><div class="nc"><div class="nr"><span class="pname${isCut?' gc':''}">${esc(p.name)}</span>${p.evLabel?`<span class="ev-tag">${esc(p.evLabel)}</span>`:''}</div><div class="mr">${!isCut&&!p.missing&&p.thru?`<span class="th-txt">${esc(p.thru)}</span>`:''}${p.earn?`<span class="pr-earn">${fmt$(p.earn)}</span>`:''}</div></div><div class="sc">${right}</div></div>`;
-  }).join('')+`</div>`;
+    return`<div class="row${isCut?' cutrow':''}${p.missing?' missing':''}"><div class="pos">${posCell}</div><div class="nc"><div class="nr"><span class="pname${isCut?' gc':''}">${esc(p.name)}</span></div><div class="mr">${!isCut&&!p.missing&&p.thru?`<span class="th-txt">${esc(p.thru)}</span>`:''}${p.earn?`<span class="pr-earn">${fmt$(p.earn)}</span>`:''}</div></div><div class="sc">${right}</div></div>`;
+  };
+  // Group by tournament: marquee picks first, then each concurrent event under its label.
+  const marq=rows.filter(p=>!p.missing&&!p.evLabel).sort(bypos);
+  const off=rows.filter(p=>!p.missing&&p.evLabel);
+  const missing=rows.filter(p=>p.missing);
+  const byEv={},evOrder=[];
+  off.forEach(p=>{if(!byEv[p.evLabel]){byEv[p.evLabel]=[];evOrder.push(p.evLabel);}byEv[p.evLabel].push(p);});
+  let h=marq.map(rowHTML).join('');
+  evOrder.forEach(l=>{h+=`<div class="cdiv evdiv"><span class="cline"></span><span class="clbl">${esc(l)}</span><span class="cline"></span></div>`+byEv[l].sort(bypos).map(rowHTML).join('');});
+  if(missing.length)h+=missing.map(rowHTML).join('');
+  return`<div class="pool-roster">`+h+`</div>`;
 }
 
 function poolHTML(){
