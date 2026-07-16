@@ -69,6 +69,7 @@
     .cdiv.pcut .cline{background:rgba(201,166,100,.4)}
     .cdiv.pcut .clbl{color:#C9A664}
     .pcut-tag{color:#C9A664!important}
+    .ev-tag{display:inline-flex;align-items:center;background:rgba(60,96,148,.15);border:1px solid rgba(60,96,148,.4);border-radius:3px;padding:0 4px;font-size:8px;font-weight:700;letter-spacing:.5px;color:#3A6094;font-family:'JetBrains Mono',monospace;white-space:nowrap}
     .ggrid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
     .gcard{background:#FFFCF5;border:1px solid rgba(27,58,46,.08);border-left:4px solid;border-radius:6px;padding:10px 11px;text-align:left;cursor:pointer;width:100%}
     .gcard:active{transform:scale(.98)}
@@ -504,9 +505,23 @@ async function fetchData(){
     parsedList.forEach((px,ei)=>px.players.forEach(p=>combined.push(ei===0?p:{...p,_off:true})));
     try{window._app.coverage=resolveField(combined);}catch{}
     // Pool field = marquee's full board + only the POOL players from the other events.
+    // Each other-event player carries their OWN event's projected money (its purse +
+    // curve — never the marquee's) and a short event label so the app can show who's
+    // playing where. Real ESPN money still overrides the projection once it posts.
     const players=parsed.players.slice();
-    for(let e=1;e<parsedList.length;e++)
-      parsedList[e].players.forEach(p=>{if(ALL_POOL.includes(matchToPool(p.name)))players.push({...p,_off:true});});
+    for(let e=1;e<parsedList.length;e++){
+      const rawEv=evs[e];
+      const enm=rawEv?.shortName||rawEv?.name||'';
+      const einfo=getTournamentInfo(enm);
+      const ePO=calcPO(Number(rawEv?.purse)||einfo.purse,einfo.curve);
+      const elabel=(enm.replace(/\s*(championship|classic|invitational)\s*$/i,'').trim()||enm).toUpperCase();
+      const etie={};parsedList[e].players.forEach(p=>{if(p.pos&&p.pos!=='CUT'&&p.pos!=='WD')etie[p.pos]=(etie[p.pos]||0)+1});
+      parsedList[e].players.forEach(p=>{
+        if(!ALL_POOL.includes(matchToPool(p.name)))return;
+        const projEarn=(p.pos&&p.pos!=='CUT'&&p.pos!=='WD'&&!p.projMissed)?projPay(p.pos,etie,ePO):0;
+        players.push({...p,_off:true,_projEarn:projEarn,_evLabel:elabel});
+      });
+    }
     const allFinal=parsedList.every(px=>px.isFinal);
     S.players=players;S.round=parsed.round;S.isFinal=(parsedList.length>1?allFinal:(parsed.isFinal||false));S.isPreTournament=parsed.isPreTournament||false;S.projCutScore=(parsed.projCutScore!=null?parsed.projCutScore:null);S.error=null;
     S.updated=new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
@@ -585,7 +600,7 @@ function gRow(p,selK){
   <div class="pos">${isCut?icoScissors:esc(p.pos)}</div>
   <div class="nc">
     <div class="nr">${owned?`<span style="color:${tc};display:inline-flex">${icoStar(tc)}</span>`:''}<span class="pname${isCut?' gc':''}">${esc(p.name)}</span></div>
-    <div class="mr">${chips(p.name,selK)}${!isCut&&p.today?`<span class="td-txt">today ${esc(p.today)}</span>`:''}${!isCut&&p.thru?`<span class="th-txt">${esc(p.thru)}</span>`:''}</div>
+    <div class="mr">${p._off&&p._evLabel?`<span class="ev-tag">${esc(p._evLabel)}</span>`:''}${chips(p.name,selK)}${!isCut&&p.today?`<span class="td-txt">today ${esc(p.today)}</span>`:''}${!isCut&&p.thru?`<span class="th-txt">${esc(p.thru)}</span>`:''}</div>
   </div>
   <div class="g-right">
     <div class="g-picked"><span>${cnt}</span><span class="g-pct">${pct}%</span></div>
@@ -600,7 +615,7 @@ function pRow(p,selK,tag){
   <div class="pos">${isCut?icoScissors:esc(p.pos)}</div>
   <div class="nc">
     <div class="nr">${owned?`<span style="color:${tc};display:inline-flex">${icoStar(tc)}</span>`:''}<span class="pname${isCut?' gc':''}">${esc(p.name)}</span></div>
-    <div class="mr">${gbadge(g)}${chips(p.name,selK)}${(tag&&pm)?`<span class="th-txt pcut-tag">proj cut</span>`:''}${!isCut&&p.today?`<span class="td-txt">today ${esc(p.today)}</span>`:''}${!isCut&&p.thru?`<span class="th-txt">${esc(p.thru)}</span>`:''}</div>
+    <div class="mr">${gbadge(g)}${p._off&&p._evLabel?`<span class="ev-tag">${esc(p._evLabel)}</span>`:''}${chips(p.name,selK)}${(tag&&pm)?`<span class="th-txt pcut-tag">proj cut</span>`:''}${!isCut&&p.today?`<span class="td-txt">today ${esc(p.today)}</span>`:''}${!isCut&&p.thru?`<span class="th-txt">${esc(p.thru)}</span>`:''}</div>
   </div>
   <div class="sc"><span class="${sc}">${esc(p.total)}</span></div>
 </div>`}
@@ -772,7 +787,8 @@ let PO=calcPO(10300000,'std'); // start with Byron Nelson (standard chart)
 let MC_PAY=0;
 
 
-function projPay(pos,tieMap){
+function projPay(pos,tieMap,po){
+  po=po||PO;                       // per-event curve (opposite-field events pass their own)
   if(!pos||pos==='WD')return 0; // not in field
   if(pos==='CUT')return MC_PAY;
   const rank=parseInt(pos.replace(/^T/,''),10);
@@ -781,11 +797,11 @@ function projPay(pos,tieMap){
   // A player who made the cut always earns at least the last listed (80th)
   // share. If a big tie at the cut line pushes finishers past position 80,
   // they get that minimum rather than $0 — matching how the Tour pays overflow.
-  const floor=PO[PO.length-1];
+  const floor=po[po.length-1];
   let sum=0;
   for(let i=0;i<n;i++){
     const idx=rank-1+i;
-    sum+=idx<PO.length?PO[idx]:floor;
+    sum+=idx<po.length?po[idx]:floor;
   }
   return Math.round(sum/n);
 }
@@ -798,10 +814,10 @@ function projPay(pos,tieMap){
 function payForPlayer(p,tieMap){
   if(!p)return 0;
   if(p.pos==='CUT'||p.pos==='WD')return 0;
-  // Player from a concurrent non-marquee event (e.g. ISCO alongside the Scottish
-  // Open): score their REAL money once it's posted; never run them through the
-  // marquee event's curve (different purse). Live, before money posts, they read $0.
-  if(p._off)return (typeof p.earnings==='number')?p.earnings:0;
+  // Player from a concurrent non-marquee event (e.g. Barracuda alongside The Open):
+  // score their REAL money once posted, else their OWN event's projection (_projEarn,
+  // computed from that event's purse+curve) — never the marquee event's curve.
+  if(p._off)return (typeof p.earnings==='number')?p.earnings:(p._projEarn||0);
   if(S.moneyComplete&&typeof p.earnings==='number')return p.earnings;
   // Below the floating projected cut line -> projected to miss -> not in the money.
   if(p.projMissed)return 0;
@@ -844,7 +860,7 @@ function poolRoster(name,pm,byC){
   if(!entry)return'';
   const rows=entry[1].map(idx=>{
     const pn=PL[idx],mk=matchToPool(pn),live=byC[mk];
-    return{name:pn,g:getG(pn),pos:live?live.pos:null,total:live?live.total:'—',thru:live?live.thru:'',missing:!live,earn:pm[mk]||0};
+    return{name:pn,g:getG(pn),pos:live?live.pos:null,total:live?live.total:'—',thru:live?live.thru:'',missing:!live,earn:pm[mk]||0,evLabel:live&&live._off?live._evLabel:''};
   });
   rows.sort((a,b)=>{
     const rk=p=>p.missing?2:(p.pos==='CUT'||p.pos==='WD')?1:0;
@@ -854,7 +870,7 @@ function poolRoster(name,pm,byC){
     const isCut=p.pos==='CUT',n=tv(p.total),sc=isCut?'cutsc':(n<0?'under':'');
     const posCell=p.missing?'—':isCut?icoScissors:esc(p.pos);
     const right=p.missing?`<span class="th-txt">not in field</span>`:`<span class="${sc}">${esc(p.total)}</span>`;
-    return`<div class="row${isCut?' cutrow':''}${p.missing?' missing':''}"><div class="pos">${posCell}</div><div class="nc"><div class="nr"><span class="pname${isCut?' gc':''}">${esc(p.name)}</span></div><div class="mr">${!isCut&&!p.missing&&p.thru?`<span class="th-txt">${esc(p.thru)}</span>`:''}${p.earn?`<span class="pr-earn">${fmt$(p.earn)}</span>`:''}</div></div><div class="sc">${right}</div></div>`;
+    return`<div class="row${isCut?' cutrow':''}${p.missing?' missing':''}"><div class="pos">${posCell}</div><div class="nc"><div class="nr"><span class="pname${isCut?' gc':''}">${esc(p.name)}</span>${p.evLabel?`<span class="ev-tag">${esc(p.evLabel)}</span>`:''}</div><div class="mr">${!isCut&&!p.missing&&p.thru?`<span class="th-txt">${esc(p.thru)}</span>`:''}${p.earn?`<span class="pr-earn">${fmt$(p.earn)}</span>`:''}</div></div><div class="sc">${right}</div></div>`;
   }).join('')+`</div>`;
 }
 
