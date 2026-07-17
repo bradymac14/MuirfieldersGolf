@@ -482,38 +482,39 @@ async function fetchData(){
     //    so a different week's event in the scoreboard (e.g. an upcoming Corales
     //    Puntacana) never bleeds its players in.
     const evsAll=Array.isArray(j?.events)?j.events:[];
-    const stateOf=ev=>ev?.competitions?.[0]?.status?.type?.state||ev?.status?.type?.state||'';
     const startOf=ev=>{const d=ev?.date||ev?.competitions?.[0]?.date||ev?.startDate;const t=d?Date.parse(d):NaN;return isNaN(t)?null:t;};
-    // Purse decides the marquee; if ESPN's purse hasn't loaded, fall back to our
-    // scheduled purse by name so a major never loses the board to an opposite-field event.
     const purseOf=ev=>{const p=Number(ev?.purse)||0;return p>0?p:(getTournamentInfo(ev?.shortName||ev?.name||'').purse||0);};
-    const liveEvs=evsAll.filter(ev=>stateOf(ev)==='in');
-    const primaryEv=(liveEvs.length?liveEvs:evsAll).slice().sort((a,b)=>purseOf(b)-purseOf(a))[0];
-    const pStart=primaryEv?startOf(primaryEv):null;
+    // Parse every event, then pick the PRIMARY (board + all meta) as the one holding the
+    // most of OUR pool players — the marquee is where the pool actually plays (The Open
+    // holds ~all the stars; a side/opposite-field event holds a handful). Purse breaks
+    // ties. This is immune to ESPN's live-state quirks and to a stray different-week event
+    // sitting in the feed, which is what mis-picked "Corales Puntacana" over The Open.
+    const parsedAll=evsAll.map(ev=>({ev,px:parseEvent(ev)})).filter(o=>o.px&&o.px.players.length);
+    if(!parsedAll.length)throw new Error('No data');
+    const poolCount=o=>o.px.players.reduce((c,p)=>ALL_POOL.includes(matchToPool(p.name))?c+1:c,0);
+    parsedAll.sort((a,b)=>poolCount(b)-poolCount(a)||purseOf(b.ev)-purseOf(a.ev));
+    const primary=parsedAll[0],primaryEv=primary.ev,pStart=startOf(primaryEv);
     const anyDates=evsAll.some(ev=>startOf(ev)!=null);
-    const evs=evsAll.filter(ev=>{
-      if(ev===primaryEv)return true;
-      if(!anyDates)return true;                       // no date info -> keep genuine multi-event weeks
-      const s=startOf(ev);
-      return s!=null&&pStart!=null&&Math.abs(s-pStart)<=4*864e5;   // same tournament week
+    // Only blend events in the SAME tournament week as primary (start within 4 days), so a
+    // different-week event in the feed (e.g. Corales Puntacana) never bleeds players in.
+    const concurrent=parsedAll.filter(o=>{
+      if(o===primary)return true;
+      if(!anyDates)return true;
+      const s=startOf(o.ev);
+      return s!=null&&pStart!=null&&Math.abs(s-pStart)<=4*864e5;
     });
-    evs.sort((a,b)=>a===primaryEv?-1:b===primaryEv?1:0);           // primary drives the board
-    const parsedList=evs.map(ev=>parseEvent(ev)).filter(Boolean);
+    const evsList=[primaryEv,...concurrent.filter(o=>o!==primary).map(o=>o.ev)];
+    const parsedList=[primary.px,...concurrent.filter(o=>o!==primary).map(o=>o.px)];
     const parsed=parsedList[0];
-    if(!parsed||!parsed.players.length)throw new Error('No data');
-    // Resolve nickname/initial variants across the WHOLE week's field (sets DYN_ALIAS)
-    // before any scoring or rendering; only truly ambiguous names are returned (logged,
-    // not bannered).
+    // Resolve nickname/initial variants across the WHOLE week's field (sets DYN_ALIAS).
     const combined=[];
     parsedList.forEach((px,ei)=>px.players.forEach(p=>combined.push(ei===0?p:{...p,_off:true})));
     try{window._app.coverage=resolveField(combined);}catch{}
-    // Pool field = marquee's full board + only the POOL players from the other events.
-    // Each other-event player carries their OWN event's projected money (its purse +
-    // curve — never the marquee's) and a short event label so the app can show who's
-    // playing where. Real ESPN money still overrides the projection once it posts.
+    // Pool field = marquee's full board + only the POOL players from the other concurrent
+    // events, each carrying their OWN event's projected money + a short event label.
     const players=parsed.players.slice();
     for(let e=1;e<parsedList.length;e++){
-      const rawEv=evs[e];
+      const rawEv=evsList[e];
       const enm=rawEv?.shortName||rawEv?.name||'';
       const einfo=getTournamentInfo(enm);
       const ePO=calcPO(Number(rawEv?.purse)||einfo.purse,einfo.curve);
