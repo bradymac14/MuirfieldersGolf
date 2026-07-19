@@ -492,13 +492,20 @@ async function fetchData(){
     const parsedAll=evsAll.map(ev=>({ev,px:parseEvent(ev)})).filter(o=>o.px&&o.px.players.length);
     if(!parsedAll.length)throw new Error('No data');
     const poolCount=o=>o.px.players.reduce((c,p)=>ALL_POOL.includes(matchToPool(p.name))?c+1:c,0);
-    parsedAll.sort((a,b)=>poolCount(b)-poolCount(a)||purseOf(b.ev)-purseOf(a.ev));
-    const primary=parsedAll[0],primaryEv=primary.ev,pStart=startOf(primaryEv);
+    // Prefer events that have actually STARTED (real scores) over upcoming ones, so a
+    // just-finished event isn't wiped the moment next week's already-committed field shows
+    // up in the feed (both list our stars). Among those, the one holding the most pool
+    // players is the marquee; purse breaks ties.
+    const started=parsedAll.filter(o=>!o.px.isPreTournament);
+    const pick=(started.length?started:parsedAll).slice().sort((a,b)=>poolCount(b)-poolCount(a)||purseOf(b.ev)-purseOf(a.ev));
+    const primary=pick[0],primaryEv=primary.ev,pStart=startOf(primaryEv);
     const anyDates=evsAll.some(ev=>startOf(ev)!=null);
-    // Only blend events in the SAME tournament week as primary (start within 4 days), so a
-    // different-week event in the feed (e.g. Corales Puntacana) never bleeds players in.
+    // Only blend events that are BOTH started and in the SAME tournament week as primary
+    // (start within 4 days) — so neither a different-week event (Corales Puntacana) nor an
+    // upcoming field bleeds players in.
     const concurrent=parsedAll.filter(o=>{
       if(o===primary)return true;
+      if(o.px.isPreTournament)return false;
       if(!anyDates)return true;
       const s=startOf(o.ev);
       return s!=null&&pStart!=null&&Math.abs(s-pStart)<=4*864e5;
