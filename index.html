@@ -266,7 +266,7 @@ function resolveField(players){
 const S={
   team:(()=>{try{return localStorage.getItem('bz-team')||'brady'}catch{return'brady'}})(),
   view:'board',players:[],status:'',updated:'',refreshing:false,error:null,group:null,stSearch:'',poolData:null,seen:ALL_POOL,comboSel:[],comboSearch:'',poolOpen:null,
-  tournamentName:'Byron Nelson',venueName:'TPC Craig Ranch',round:1,isFinal:false,moneyComplete:false,officialFinal:false,isPreTournament:false,projCutScore:null,startDate:'',nifExpanded:false
+  tournamentName:'Byron Nelson',venueName:'TPC Craig Ranch',round:1,isFinal:false,moneyComplete:false,officialFinal:false,isPreTournament:false,projCutScore:null,heldFinal:false,startDate:'',nifExpanded:false
 };
 try{
   const ck=localStorage.getItem('bz-current-key');
@@ -534,7 +534,7 @@ async function fetchData(){
       });
     }
     const allFinal=parsedList.every(px=>px.isFinal);
-    S.players=players;S.round=parsed.round;S.isFinal=(parsedList.length>1?allFinal:(parsed.isFinal||false));S.isPreTournament=parsed.isPreTournament||false;S.projCutScore=(parsed.projCutScore!=null?parsed.projCutScore:null);S.error=null;
+    S.players=players;S.round=parsed.round;S.isFinal=(parsedList.length>1?allFinal:(parsed.isFinal||false));S.isPreTournament=parsed.isPreTournament||false;S.projCutScore=(parsed.projCutScore!=null?parsed.projCutScore:null);S.heldFinal=false;S.error=null;
     S.updated=new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
     S.status=primaryEv?.status?.type?.detail||primaryEv?.competitions?.[0]?.status?.type?.detail||'';
     // Save all player names ESPN ever returned (to distinguish cut vs not in field)
@@ -581,6 +581,27 @@ async function fetchData(){
       const ck2='bz-'+can(S.tournamentName).replace(/ /g,'').slice(0,18);
       localStorage.setItem('bz-current-key',ck2);
       localStorage.setItem(ck2,JSON.stringify({players:parsed.players,updated:S.updated,status:S.status,seen:allSeen,tournamentName:S.tournamentName,venueName:S.venueName,purse:usePurse}));
+    }catch{}
+    // ── Hold the last final week for 48h as a reference ──────────────────────────
+    // When the live feed has rolled to only-upcoming events, don't blank the app the
+    // moment a tournament ends: snapshot every FINAL week, and for 48h after the feed
+    // stops carrying it keep showing that final leaderboard, then transition to the new
+    // tournament. (The started-event preference above already keeps a final event up
+    // while ESPN still lists it; this covers the gap after ESPN drops it.)
+    try{
+      const LF='bz-lastfinal',DAY=864e5;
+      if(S.isFinal&&!S.isPreTournament&&S.players&&S.players.length){
+        localStorage.setItem(LF,JSON.stringify({at:Date.now(),players:S.players,seen:S.seen,tournamentName:S.tournamentName,venueName:S.venueName,round:S.round,purse:S.purse,purseLive:S.purseLive,curve:S.curve,moneyComplete:S.moneyComplete,officialFinal:S.officialFinal,projCutScore:S.projCutScore}));
+      }else if(S.isPreTournament){
+        const lf=JSON.parse(localStorage.getItem(LF)||'null');
+        if(lf&&lf.players&&lf.players.length&&(Date.now()-lf.at)<2*DAY){
+          S.players=lf.players;S.seen=lf.seen||S.seen;S.round=lf.round||4;S.isFinal=true;S.isPreTournament=false;
+          S.moneyComplete=!!lf.moneyComplete;S.officialFinal=!!lf.officialFinal;S.projCutScore=(lf.projCutScore!=null?lf.projCutScore:null);
+          S.tournamentName=lf.tournamentName;S.venueName=lf.venueName;S.purse=lf.purse;S.purseLive=!!lf.purseLive;S.curve=lf.curve||'std';
+          PO=calcPO(lf.purse||10300000,lf.curve||'std');S.heldFinal=true;
+          try{S.health=healthCheck();window._app.health=S.health;}catch(_){}
+        }
+      }
     }catch{}
   }catch(e){S.error=e.message||'Refresh failed'}
   S.refreshing=false;render();
@@ -1055,7 +1076,7 @@ function render(){
     </div>
     <button class="rbtn${S.refreshing?' spinning':''}" id="rbtn">${icoRefresh}</button>
   </div>
-  <div class="upd-row"><span class="dot"></span><span>${S.updated?'Live · '+S.updated:'Connecting…'}</span></div>
+  <div class="upd-row"><span class="dot"${S.heldFinal?' style="background:#9A9A9A;box-shadow:none;animation:none"':''}></span><span>${S.heldFinal?'Final result · showing last event':(S.updated?'Live · '+S.updated:'Connecting…')}</span></div>
   ${S.error?`<div class="err">⚠ ${esc(S.error)}</div>`:''}
   ${(S.health&&S.health.length)?S.health.map(wn=>`<div class="err">⚠ ${esc(wn)}</div>`).join(''):''}
 </header>
