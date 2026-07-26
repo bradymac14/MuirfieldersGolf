@@ -565,16 +565,23 @@ async function fetchData(){
       // moneyComplete needs EVERY made pool golfer to have money — across all events
       // (an other-event golfer who missed the ISCO cut is pos==='CUT', so excluded).
       const madeP=S.players.filter(p=>p.pos&&p.pos!=='CUT'&&p.pos!=='WD');
-      S.moneyComplete=S.isFinal&&madeP.length>0&&madeP.every(p=>typeof p.earnings==='number');
-      let reconciledOK=true;
-      if((S.curve==='std'||S.curve==='sig')&&S.purse>0){
-        // Reconcile only the MARQUEE field to the marquee purse — other-event players
-        // (ISCO) carry their own purse and would blow past this total.
-        const tmR={};S.players.forEach(p=>{if(!p._off&&p.pos&&p.pos!=='CUT'&&p.pos!=='WD')tmR[p.pos]=(tmR[p.pos]||0)+1});
-        let totR=0;S.players.forEach(p=>{if(!p._off)totR+=payForPlayer(p,tmR)});
-        reconciledOK=Math.abs(totR-S.purse)/S.purse<=0.03;
+      const allHaveMoney=madeP.length>0&&madeP.every(p=>typeof p.earnings==='number');
+      // ESPN can flip an event to completed and attach a $0 (or partial) money figure to
+      // every player during the finalizing window, BEFORE it posts the real amounts. A
+      // bare "everyone has a number" check then flips moneyComplete true and payForPlayer
+      // switches to that $0 real money — blanking every payout in the pool (all "—", all
+      // teams tied at #1). Guard it by reconciling the attached money to the purse: real
+      // official money for the marquee field always totals ~the purse (amateurs forfeit a
+      // sliver, hence the 5% tolerance), so only trust it once it actually adds up. Until
+      // then moneyComplete stays false and payForPlayer keeps using PROJECTED pay, so the
+      // pool shows live projected standings instead of a wall of "—".
+      let moneyReconciles=false;
+      if(allHaveMoney){
+        const marqEarn=S.players.reduce((s,p)=>(!p._off&&p.pos&&p.pos!=='CUT'&&p.pos!=='WD')?s+(p.earnings||0):s,0);
+        moneyReconciles=(S.purse>0)?Math.abs(marqEarn-S.purse)/S.purse<=0.05:marqEarn>0;
       }
-      S.officialFinal=S.isFinal&&S.moneyComplete&&reconciledOK;
+      S.moneyComplete=S.isFinal&&allHaveMoney&&moneyReconciles;
+      S.officialFinal=S.moneyComplete;
       try{S.health=healthCheck();window._app.health=S.health;}catch(_){S.health=[];}
       const espnVenue=primaryEv?.competitions?.[0]?.venue?.fullName||'';
       S.venueName=espnVenue||ti2.venue||S.venueName;
