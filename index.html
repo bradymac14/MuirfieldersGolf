@@ -492,12 +492,26 @@ async function fetchData(){
     const parsedAll=evsAll.map(ev=>({ev,px:parseEvent(ev)})).filter(o=>o.px&&o.px.players.length);
     if(!parsedAll.length)throw new Error('No data');
     const poolCount=o=>o.px.players.reduce((c,p)=>ALL_POOL.includes(matchToPool(p.name))?c+1:c,0);
-    // Prefer events that have actually STARTED (real scores) over upcoming ones, so a
-    // just-finished event isn't wiped the moment next week's already-committed field shows
-    // up in the feed (both list our stars). Among those, the one holding the most pool
-    // players is the marquee; purse breaks ties.
-    const started=parsedAll.filter(o=>!o.px.isPreTournament);
-    const pick=(started.length?started:parsedAll).slice().sort((a,b)=>poolCount(b)-poolCount(a)||purseOf(b.ev)-purseOf(a.ev));
+    // Choose which event the whole app locks onto, in priority tiers:
+    //   1. LIVE (started, not yet final) — real scores in progress always win.
+    //   2. FRESH FINAL — a finished event stays up as the reference for ~48h after it
+    //      ends (finish ≈ start+3d), so the pool can review last week's result.
+    //   3. UPCOMING — once the finished event is >48h stale, transition to next week's
+    //      field even though ESPN still lists the old one in the feed alongside it (ESPN
+    //      keeps a finished event around for days). This is the 48h-then-roll-forward the
+    //      pool asked for; without a staleness cap a finished event never yields and the
+    //      app shows last week forever.
+    //   4. STALE FINAL — last resort, only if there's nothing live/fresh/upcoming.
+    // Within the chosen tier, the event holding the most pool players is the marquee;
+    // purse breaks ties.
+    const DAY=864e5,nowMs=Date.now();
+    const isStaleFinal=o=>{if(!o.px.isFinal)return false;const s=startOf(o.ev);return s!=null&&(nowMs-s)>5*DAY;};
+    const live=parsedAll.filter(o=>!o.px.isPreTournament&&!o.px.isFinal);
+    const freshFinal=parsedAll.filter(o=>o.px.isFinal&&!isStaleFinal(o));
+    const upcoming=parsedAll.filter(o=>o.px.isPreTournament);
+    const staleFinal=parsedAll.filter(o=>isStaleFinal(o));
+    const tier=live.length?live:freshFinal.length?freshFinal:upcoming.length?upcoming:staleFinal.length?staleFinal:parsedAll;
+    const pick=tier.slice().sort((a,b)=>poolCount(b)-poolCount(a)||purseOf(b.ev)-purseOf(a.ev));
     const primary=pick[0],primaryEv=primary.ev,pStart=startOf(primaryEv);
     const anyDates=evsAll.some(ev=>startOf(ev)!=null);
     // Only blend events that are BOTH started and in the SAME tournament week as primary
