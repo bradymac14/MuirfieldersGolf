@@ -513,6 +513,23 @@ async function fetchData(){
     const tier=live.length?live:freshFinal.length?freshFinal:upcoming.length?upcoming:staleFinal.length?staleFinal:parsedAll;
     const pick=tier.slice().sort((a,b)=>poolCount(b)-poolCount(a)||purseOf(b.ev)-purseOf(a.ev));
     const primary=pick[0],primaryEv=primary.ev,pStart=startOf(primaryEv);
+    // Nothing live, no fresh final inside its 48h reference window, and ESPN isn't yet
+    // serving an upcoming event — only a stale finished event is left in the feed. Don't
+    // sit on last week: roll forward to the next tournament on our own schedule as a
+    // pre-tournament placeholder (header + venue + "starts <day>", pool teams listed with
+    // no scores) until ESPN publishes its field, at which point the normal path takes over.
+    if(!live.length&&!freshFinal.length&&!upcoming.length&&staleFinal.length){
+      const nx=nextScheduled(pStart!=null?pStart+DAY:nowMs);
+      if(nx){
+        S.tournamentName=nx.name;S.venueName=nx.venue;S.startDate=nx.startDate;
+        S.players=[];S.round=1;S.isFinal=false;S.isPreTournament=true;S.heldFinal=false;
+        S.moneyComplete=false;S.officialFinal=false;S.projCutScore=null;S.error=null;
+        S.purse=nx.purse;S.purseLive=false;S.curve=nx.curve;PO=calcPO(nx.purse,nx.curve);MC_PAY=0;
+        S.updated=new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
+        S.status='';try{S.health=healthCheck();window._app.health=S.health;}catch(_){S.health=[];}
+        S.refreshing=false;render();return;
+      }
+    }
     const anyDates=evsAll.some(ev=>startOf(ev)!=null);
     // Only blend events that are BOTH started and in the SAME tournament week as primary
     // (start within 4 days) — so neither a different-week event (Corales Puntacana) nor an
@@ -611,8 +628,12 @@ async function fetchData(){
     // while ESPN still lists it; this covers the gap after ESPN drops it.)
     try{
       const LF='bz-lastfinal',DAY=864e5;
-      if(S.isFinal&&!S.isPreTournament&&S.players&&S.players.length){
-        localStorage.setItem(LF,JSON.stringify({at:Date.now(),players:S.players,seen:S.seen,tournamentName:S.tournamentName,venueName:S.venueName,round:S.round,purse:S.purse,purseLive:S.purseLive,curve:S.curve,moneyComplete:S.moneyComplete,officialFinal:S.officialFinal,projCutScore:S.projCutScore}));
+      // Snapshot a FINISHED event only while it's still FRESH (within ~48h of its finish).
+      // at = the event's finish (~start+3d), NOT Date.now() — so the 48h window is honest
+      // no matter how often we refresh, and a stale event can never re-arm the hold (which
+      // is what let last week's board linger for days).
+      if(S.isFinal&&!S.isPreTournament&&S.players&&S.players.length&&(pStart==null||(nowMs-pStart)<=5*DAY)){
+        localStorage.setItem(LF,JSON.stringify({at:(pStart!=null?pStart+3*DAY:Date.now()),players:S.players,seen:S.seen,tournamentName:S.tournamentName,venueName:S.venueName,round:S.round,purse:S.purse,purseLive:S.purseLive,curve:S.curve,moneyComplete:S.moneyComplete,officialFinal:S.officialFinal,projCutScore:S.projCutScore}));
       }else if(S.isPreTournament){
         const lf=JSON.parse(localStorage.getItem(LF)||'null');
         if(lf&&lf.players&&lf.players.length&&(Date.now()-lf.at)<2*DAY){
@@ -827,6 +848,20 @@ function getTournamentInfo(name){
     if(n.includes(kw))return{purse,curve,venue,startDate,mcPay:mcPay||0};
   }
   return{purse:9500000,curve:'std',venue:'',startDate:'',mcPay:0};
+}
+// The next tournament on OUR 2026 schedule strictly after `afterMs`. Used to roll the
+// app forward to the upcoming event when ESPN is still only serving last week's finished
+// event (ESPN often lags a day or two before publishing the new field). Returns null if
+// nothing later is scheduled.
+function nextScheduled(afterMs){
+  let best=null;
+  for(const[kw,purse,curve,venue,startDate] of SCHED2026){
+    if(!startDate)continue;
+    const t=Date.parse(startDate+'T12:00:00');
+    if(isNaN(t)||t<=afterMs)continue;
+    if(!best||t<best.at)best={name:kw.replace(/\b\w/g,c=>c.toUpperCase()),venue,startDate,purse,curve,at:t};
+  }
+  return best;
 }
 function getStartDay(dateStr){
   if(!dateStr)return'THURSDAY';
