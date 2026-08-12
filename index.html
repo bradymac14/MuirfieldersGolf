@@ -507,15 +507,16 @@ async function fetchData(){
     const DAY=864e5,nowMs=Date.now();
     // A finished event is "stale" (stop preferring it, roll forward) when EITHER it's
     // >~48h past its own finish (finish ≈ start+3d, so start+5d) OR the next tournament on
-    // our schedule has effectively arrived (within a day of its start). The second clause
-    // makes the roll-forward robust no matter whether ESPN dates the event by its Thursday
-    // start or its Sunday finish — by the Wednesday before the next event, we move on.
+    // our schedule has effectively arrived (within two days of its start — i.e. by the
+    // Tuesday before a Thursday start). The second clause makes the roll-forward robust no
+    // matter whether ESPN dates the event by its Thursday start or its Sunday finish, and
+    // matches the ~48h-after-Sunday reference window the pool wants.
     const isStaleFinal=o=>{
       if(!o.px.isFinal)return false;
       const s=startOf(o.ev);
       if(s!=null&&(nowMs-s)>5*DAY)return true;
       const nx=nextScheduled(s!=null?s+DAY:nowMs-6*DAY);
-      return !!nx&&nowMs>=nx.at-DAY;
+      return !!nx&&nowMs>=nx.at-2*DAY;
     };
     const live=parsedAll.filter(o=>!o.px.isPreTournament&&!o.px.isFinal);
     const freshFinal=parsedAll.filter(o=>o.px.isFinal&&!isStaleFinal(o));
