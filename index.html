@@ -648,7 +648,14 @@ async function fetchData(){
         localStorage.setItem(LF,JSON.stringify({at:(pStart!=null?pStart+3*DAY:Date.now()),players:S.players,seen:S.seen,tournamentName:S.tournamentName,venueName:S.venueName,round:S.round,purse:S.purse,purseLive:S.purseLive,curve:S.curve,moneyComplete:S.moneyComplete,officialFinal:S.officialFinal,projCutScore:S.projCutScore}));
       }else if(S.isPreTournament){
         const lf=JSON.parse(localStorage.getItem(LF)||'null');
-        if(lf&&lf.players&&lf.players.length&&(Date.now()-lf.at)<2*DAY){
+        // Only keep showing the held final while it's genuinely within its ~48h reference
+        // window. Compute the window from the held event's SCHEDULED finish (start+3d, so
+        // release at start+5d) via our own schedule — robust against a stale `at` written by
+        // an older build that reset it on every refresh — and fall back to `at` only if the
+        // name doesn't resolve. Once it passes, release the hold so the upcoming event shows.
+        const hs=Date.parse((getTournamentInfo((lf&&lf.tournamentName)||'').startDate||'')+'T12:00:00');
+        const heldFresh=!isNaN(hs)?(Date.now()<hs+5*DAY):(!!lf&&(Date.now()-lf.at)<2*DAY);
+        if(lf&&lf.players&&lf.players.length&&heldFresh){
           S.players=lf.players;S.seen=lf.seen||S.seen;S.round=lf.round||4;S.isFinal=true;S.isPreTournament=false;
           S.moneyComplete=!!lf.moneyComplete;S.officialFinal=!!lf.officialFinal;S.projCutScore=(lf.projCutScore!=null?lf.projCutScore:null);
           S.tournamentName=lf.tournamentName;S.venueName=lf.venueName;S.purse=lf.purse;S.purseLive=!!lf.purseLive;S.curve=lf.curve||'std';
