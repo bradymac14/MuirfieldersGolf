@@ -505,7 +505,18 @@ async function fetchData(){
     // Within the chosen tier, the event holding the most pool players is the marquee;
     // purse breaks ties.
     const DAY=864e5,nowMs=Date.now();
-    const isStaleFinal=o=>{if(!o.px.isFinal)return false;const s=startOf(o.ev);return s!=null&&(nowMs-s)>5*DAY;};
+    // A finished event is "stale" (stop preferring it, roll forward) when EITHER it's
+    // >~48h past its own finish (finish ≈ start+3d, so start+5d) OR the next tournament on
+    // our schedule has effectively arrived (within a day of its start). The second clause
+    // makes the roll-forward robust no matter whether ESPN dates the event by its Thursday
+    // start or its Sunday finish — by the Wednesday before the next event, we move on.
+    const isStaleFinal=o=>{
+      if(!o.px.isFinal)return false;
+      const s=startOf(o.ev);
+      if(s!=null&&(nowMs-s)>5*DAY)return true;
+      const nx=nextScheduled(s!=null?s+DAY:nowMs-6*DAY);
+      return !!nx&&nowMs>=nx.at-DAY;
+    };
     const live=parsedAll.filter(o=>!o.px.isPreTournament&&!o.px.isFinal);
     const freshFinal=parsedAll.filter(o=>o.px.isFinal&&!isStaleFinal(o));
     const upcoming=parsedAll.filter(o=>o.px.isPreTournament);
